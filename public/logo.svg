@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" fill="none">
+  <!-- Heart shape -->
+  <path d="M100 220 C100 220 20 160 20 100 C20 60 50 30 80 30 C95 30 100 45 100 45 C100 45 105 30 120 30 C150 30 180 60 180 100 C180 160 100 220 100 220Z" 
+    stroke="#EA580C" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Cross -->
+  <line x1="100" y1="40" x2="100" y2="190" stroke="#EA580C" stroke-width="10" stroke-linecap="round"/>
+  <line x1="70" y1="80" x2="130" y2="80" stroke="#EA580C" stroke-width="10" stroke-linecap="round"/>
+  <!-- EPC text -->
+  <text x="130" y="145" font-family="Arial, sans-serif" font-weight="bold" font-size="24" fill="#EA580C">EPC</text>
+  <!-- Stylized person/flame at bottom -->
+  <circle cx="100" cy="195" r="6" fill="#EA580C"/>
+  <path d="M88 215 C88 215 92 205 100 205 C108 205 112 215 112 215" stroke="#EA580C" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M85 230 C85 230 95 218 100 218 C105 218 115 230 115 230" stroke="#EA580C" stroke-width="5" fill="none" stroke-linecap="round"/>
+</svg>

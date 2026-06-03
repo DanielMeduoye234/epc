@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/send-prayers",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/send-scheduled",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

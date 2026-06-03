@@ -1,36 +1,109 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EPC Dashboard - Everything by Prayer
+
+Church Growth Dashboard for tracking New Believers, First Timers, and Members.
 
 ## Getting Started
 
-First, run the development server:
+### 1. Set up Supabase
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. Go to [supabase.com](https://supabase.com) and create a new project.
+2. Navigate to **SQL Editor** in your Supabase dashboard.
+3. Copy and paste the contents of `supabase/schema.sql` and run it.
+4. Go to **Settings > API** and copy your:
+   - **Project URL** (e.g., `https://xxxx.supabase.co`)
+   - **Anon public key**
+
+### 2. Configure Environment Variables
+
+Edit `.env.local` in the project root:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Create Your First Branch and Super Admin
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. In Supabase **Authentication**, create a new user (email + password).
+2. In the **SQL Editor**, run:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```sql
+INSERT INTO branches (name, location, branch_code)
+VALUES ('EPC Apache', 'Your Location', 'epc-apache');
 
-## Learn More
+INSERT INTO profiles (id, full_name, email, role, branch_id)
+VALUES (
+  'PASTE_YOUR_AUTH_USER_UUID_HERE',
+  'Your Name',
+  'your-email@example.com',
+  'super_admin',
+  (SELECT id FROM branches WHERE branch_code = 'epc-apache')
+);
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 4. Run the Development Server
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open [http://localhost:3000](http://localhost:3000) and log in with your credentials.
 
-## Deploy on Vercel
+## Features
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **New Believers** - Record people who give their lives to Christ
+- **First Timers** - Track first-time visitors (auto-promoted to Member after 3 weeks attendance)
+- **Members** - Manage church members with attendance tracking
+- **Analytics** - Visual growth charts and Bacenta distribution
+- **Attendance** - Weekly attendance marking for Shepherds
+- **Multi-Branch** - Each EPC branch has isolated data
+- **Role-Based Access** - Super Admin, Shepherd, Recorder
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Brand Colors
+
+- White: `#FFFFFF`
+- Black: `#000000`
+- Gradient Orange: `from-orange-400 to-orange-600`
+
+## Tech Stack
+
+- **Frontend:** Next.js 16 + TypeScript + Tailwind CSS
+- **Backend:** Supabase (PostgreSQL + Auth + RLS)
+- **Charts:** Recharts
+- **Icons:** Lucide React
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── login/page.tsx              # Login page
+│   ├── dashboard/
+│   │   ├── page.tsx                # Dashboard with analytics
+│   │   ├── layout.tsx              # Dashboard layout with sidebar
+│   │   ├── new-believers/page.tsx  # New Believers CRUD
+│   │   ├── first-timers/page.tsx   # First Timers CRUD
+│   │   ├── members/page.tsx        # Members list
+│   │   ├── attendance/page.tsx     # Attendance marking
+│   │   ├── settings/page.tsx       # User management (Super Admin)
+│   │   └── profile/[type]/[id]/    # Profile detail page
+│   └── auth/callback/route.ts      # Auth callback handler
+├── components/
+│   ├── AuthProvider.tsx            # Auth context provider
+│   └── Sidebar.tsx                 # Navigation sidebar
+├── lib/
+│   ├── types.ts                    # TypeScript interfaces
+│   └── supabase/
+│       ├── client.ts               # Browser Supabase client
+│       └── server.ts               # Server Supabase client
+└── middleware.ts                    # Auth middleware
+```
+
+## Roles
+
+| Role | Permissions |
+|------|------------|
+| Super Admin | Full access to all data in their branch, manage users |
+| Shepherd | View/update assigned members, mark attendance, record conversions |
+| Recorder | Record new believer information only |
