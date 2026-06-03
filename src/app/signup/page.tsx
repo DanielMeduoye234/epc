@@ -51,7 +51,7 @@ export default function SignupPage() {
       const { data: branch } = await supabase
         .from('branches')
         .select('id')
-        .eq('branch_code', branchCode.trim().toUpperCase())
+        .ilike('branch_code', branchCode.trim())
         .maybeSingle();
       if (!branch) {
         setError('Branch code not found. Please check with your admin and try again.');

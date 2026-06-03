@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       const { data: branch } = await admin
         .from('branches')
         .select('id')
-        .eq('branch_code', (branchCode as string).toUpperCase())
+        .ilike('branch_code', (branchCode as string).trim())
         .maybeSingle();
 
       if (!branch) {
