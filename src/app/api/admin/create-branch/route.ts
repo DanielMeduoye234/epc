@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
   const { data: branch, error: branchError } = await admin
     .from('branches')
-    .insert({ name, location: location || null, branch_code })
+    .insert({ name, location: location || null, branch_code: (branch_code as string).toUpperCase() })
     .select()
     .single();
 
