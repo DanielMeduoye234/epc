@@ -563,6 +563,34 @@ export default function ChurchAttendancePage() {
                         </React.Fragment>
                       );
                     })}
+                    {/* Sunday Totals Row */}
+                    <tr className="bg-orange-50 border-t-2 border-orange-200">
+                      <td className="sticky left-0 z-10 bg-orange-50 px-3 py-2 border-r border-gray-200 font-bold text-orange-700 text-[11px] whitespace-nowrap" style={{ minWidth: 200 }}>
+                        SUNDAY TOTAL
+                      </td>
+                      {sundays.map(s => {
+                        const ds = toDateStr(s);
+                        const present = trackerMembers.filter(m => (attendanceMap[m.id] || {})[ds] === true).length;
+                        const absent = trackerMembers.filter(m => (attendanceMap[m.id] || {})[ds] === false).length;
+                        return (
+                          <td key={ds} className="px-0.5 py-2 text-center border-l border-gray-200">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="w-3 h-3 rounded bg-green-500"></span>
+                                <span className="font-bold text-green-700">{present}</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="w-3 h-3 rounded bg-red-400"></span>
+                                <span className="font-bold text-red-600">{absent}</span>
+                              </div>
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2 text-center border-l border-gray-200 font-bold text-orange-700">
+                        {trackerMembers.length}
+                      </td>
+                    </tr>
                     {trackerMembers.length === 0 && (
                       <tr>
                         <td colSpan={sundays.length + 2} className="text-center py-12 text-gray-400">
