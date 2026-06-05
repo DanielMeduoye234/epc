@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { NewBeliever, Bacenta } from '@/lib/types';
-import { DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
+import { DEMO_BACENTAS, DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
 import { Plus, Search, X, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import BacentaSelect from '@/components/BacentaSelect';
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -15,12 +16,6 @@ function WhatsAppIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-
-const DEMO_BACENTAS: Bacenta[] = [
-  { id: 'bac-1', name: 'Bacenta Alpha', leader_name: 'Brother Samuel', location: 'Zone A, Lagos', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
-  { id: 'bac-2', name: 'Bacenta Beta', leader_name: 'Sister Joy', location: 'Zone B, Ikeja', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
-  { id: 'bac-3', name: 'Bacenta Omega', leader_name: 'Brother Daniel', location: 'Zone C, Lekki', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
-];
 
 interface NewBelieverWithRecorder extends NewBeliever {
   recorder_name?: string;
@@ -394,16 +389,14 @@ function NewBelieverForm({
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black" placeholder="Enter address" />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Assign to Bacenta</label>
-            <select required value={form.bacenta} onChange={(e) => setForm({ ...form, bacenta: e.target.value })}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black bg-white">
-              <option value="">Select a bacenta...</option>
-              {bacentas.map((b) => (
-                <option key={b.id} value={b.name}>{b.name}{b.leader_name ? ` — ${b.leader_name}` : ''}</option>
-              ))}
-            </select>
-          </div>
+          <BacentaSelect
+            label="Assign to Bacenta"
+            required
+            value={form.bacenta}
+            onChange={(value) => setForm({ ...form, bacenta: value })}
+            bacentas={bacentas}
+            includeLeader
+          />
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number (WhatsApp)</label>

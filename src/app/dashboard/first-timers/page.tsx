@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { FirstTimer, Bacenta } from '@/lib/types';
-import { DEMO_FIRST_TIMERS } from '@/lib/demo-data';
+import { DEMO_BACENTAS, DEMO_FIRST_TIMERS } from '@/lib/demo-data';
 import { Plus, Search, X, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import BacentaSelect from '@/components/BacentaSelect';
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -15,12 +16,6 @@ function WhatsAppIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-
-const DEMO_BACENTAS: Bacenta[] = [
-  { id: 'bac-1', name: 'Bacenta Alpha', leader_name: 'Brother Samuel', location: 'Zone A, Lagos', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
-  { id: 'bac-2', name: 'Bacenta Beta', leader_name: 'Sister Joy', location: 'Zone B, Ikeja', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
-  { id: 'bac-3', name: 'Bacenta Omega', leader_name: 'Brother Daniel', location: 'Zone C, Lekki', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
-];
 
 type FirstTimerWithAttendance = FirstTimer & { _max_in_month?: number };
 

@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { DEMO_MEMBERS, DEMO_USERS, DEMO_FIRST_TIMERS } from '@/lib/demo-data';
 import { Users, TrendingUp, TrendingDown, Eye, Phone, MapPin, Calendar, ChevronDown, ChevronUp, Award, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 interface ShepherdProfile {
   id: string;
@@ -34,8 +35,17 @@ interface ShepherdMember {
   attendanceRate: number;
 }
 
+function getWeekKey(dateStr: string): string {
+  const d = new Date(dateStr);
+  const start = new Date(d);
+  start.setDate(d.getDate() - d.getDay());
+  return start.toISOString().split('T')[0];
+}
+
 export default function ShepherdsPage() {
   const { profile, isDemo } = useAuth();
+  const searchParams = useSearchParams();
+  const selectedShepherdFromQuery = searchParams.get('shepherdId');
   const supabase = createClient();
   const [shepherds, setShepherds] = useState<ShepherdProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +56,29 @@ export default function ShepherdsPage() {
       if (isDemo) loadDemoData();
       else fetchShepherdData();
     }
+  }, [profile, isDemo]);
+
+  useEffect(() => {
+    if (!selectedShepherdFromQuery || shepherds.length === 0) return;
+    const exists = shepherds.some((s) => s.id === selectedShepherdFromQuery);
+    if (exists) setExpandedId(selectedShepherdFromQuery);
+  }, [selectedShepherdFromQuery, shepherds]);
+
+  useEffect(() => {
+    if (!profile || isDemo) return;
+
+    const refresh = () => fetchShepherdData();
+    const filter = `branch_id=eq.${profile.branch_id}`;
+    const channel = supabase.channel(`shepherds-live-${profile.branch_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'members', filter }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance', filter }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'first_timers', filter }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter }, refresh)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [profile, isDemo]);
 
   function loadDemoData() {
@@ -143,21 +176,31 @@ export default function ShepherdsPage() {
 
     // Build attendance map
     const attendanceMap: Record<string, { present: number; total: number }> = {};
+    const weeklyAttendanceMap: Record<string, Map<string, boolean>> = {};
+    const weekKeysSet = new Set<string>();
     memberIds.forEach((id: string) => { attendanceMap[id] = { present: 0, total: 0 }; });
-    attendanceData?.forEach((a: { person_id: string; is_present: boolean }) => {
+    memberIds.forEach((id: string) => { weeklyAttendanceMap[id] = new Map(); });
+    attendanceData?.forEach((a: { person_id: string; is_present: boolean; date: string }) => {
       if (attendanceMap[a.person_id]) {
         attendanceMap[a.person_id].total++;
         if (a.is_present) attendanceMap[a.person_id].present++;
       }
+
+      const weekKey = getWeekKey(a.date);
+      weekKeysSet.add(weekKey);
+      if (weeklyAttendanceMap[a.person_id]) {
+        const existing = weeklyAttendanceMap[a.person_id].get(weekKey);
+        if (a.is_present || existing === undefined) {
+          weeklyAttendanceMap[a.person_id].set(weekKey, a.is_present);
+        }
+      }
     });
+
+    const weekKeys = Array.from(weekKeysSet).sort().slice(-6);
 
     const result: ShepherdProfile[] = shepherdProfiles.map((sp: { id: string; full_name: string; email: string }) => {
       const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null }) => m.assigned_shepherd === sp.id);
       const firstTimers = (allFirstTimers || []).filter((ft: { assigned_shepherd: string | null }) => ft.assigned_shepherd === sp.id);
-      const active = sheep.filter((m: { status: string }) => m.status === 'active').length;
-      const flagged = sheep.filter((m: { status: string }) => m.status === 'flagged').length;
-      const inactive = sheep.filter((m: { status: string }) => m.status === 'inactive').length;
-
       const members: ShepherdMember[] = sheep.map((m: { id: string; full_name: string; photo_url: string | null; status: string; bacenta: string; phone_number: string; date_joined: string }) => {
         const record = attendanceMap[m.id] || { present: 0, total: 0 };
         const rate = record.total > 0 ? Math.round((record.present / record.total) * 100) : 0;
@@ -177,18 +220,35 @@ export default function ShepherdsPage() {
         ? Math.round(members.reduce((s, m) => s + m.attendanceRate, 0) / members.length)
         : 0;
 
+      const faithful = members.filter((m: ShepherdMember) => m.attendanceRate >= 70).length;
+      const atRisk = members.filter((m: ShepherdMember) => m.attendanceRate >= 30 && m.attendanceRate < 70).length;
+      const lost = members.filter((m: ShepherdMember) => m.attendanceRate < 30).length;
+
+      const weeklyRates = weekKeys.map((weekKey) => {
+        let present = 0;
+        let total = 0;
+        sheep.forEach((m: { id: string }) => {
+          const value = weeklyAttendanceMap[m.id]?.get(weekKey);
+          if (value !== undefined) {
+            total++;
+            if (value) present++;
+          }
+        });
+        return total > 0 ? Math.round((present / total) * 100) : 0;
+      });
+
       return {
         id: sp.id,
         name: sp.full_name,
         email: sp.email,
         role: 'shepherd',
         totalSheep: sheep.length,
-        activeSheep: active,
-        flaggedSheep: flagged,
-        inactiveSheep: inactive,
+        activeSheep: faithful,
+        flaggedSheep: atRisk,
+        inactiveSheep: lost,
         firstTimers: firstTimers.length,
         avgAttendance,
-        weeklyRates: [],
+        weeklyRates,
         members: members.sort((a: ShepherdMember, b: ShepherdMember) => a.attendanceRate - b.attendanceRate),
       };
     });
@@ -266,9 +326,9 @@ export default function ShepherdsPage() {
                 <div className="flex items-center gap-3 sm:gap-4">
                   {/* Rank badge */}
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${
-                    idx === 0 ? 'bg-gradient-to-br from-yellow-400 to-amber-500' :
-                    idx === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-500' :
-                    'bg-gradient-to-br from-orange-400 to-orange-600'
+                    idx === 0 ? 'bg-linear-to-br from-yellow-400 to-amber-500' :
+                    idx === 1 ? 'bg-linear-to-br from-gray-300 to-gray-500' :
+                    'bg-linear-to-br from-orange-400 to-orange-600'
                   }`}>
                     {idx === 0 ? <Award size={22} /> : `#${idx + 1}`}
                   </div>
@@ -389,7 +449,7 @@ export default function ShepherdsPage() {
                                 className={`flex items-center justify-between px-3 sm:px-4 py-3 hover:bg-orange-50/50 transition border-l-4 ${borderColor}`}
                               >
                                 <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center overflow-hidden shrink-0">
                                     {member.photo_url ? (
                                       <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
                                     ) : (
@@ -420,7 +480,7 @@ export default function ShepherdsPage() {
                                       style={{ width: `${member.attendanceRate}%` }}
                                     ></div>
                                   </div>
-                                  <span className={`text-xs font-bold min-w-[32px] text-right ${
+                                  <span className={`text-xs font-bold min-w-8 text-right ${
                                     member.attendanceRate >= 70 ? 'text-green-600' :
                                     member.attendanceRate >= 30 ? 'text-amber-600' : 'text-red-600'
                                   }`}>

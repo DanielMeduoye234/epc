@@ -36,6 +36,18 @@ interface MonthlyData {
   members: number;
 }
 
+interface WeeklyAttendanceData {
+  week: string;
+  present: number;
+  absent: number;
+  attendanceRate: number;
+}
+
+interface WeeklyFirstTimerData {
+  week: string;
+  count: number;
+}
+
 interface ShepherdStats {
   totalSheep: number;
   activeSheep: number;
@@ -53,6 +65,18 @@ interface SheepAttendance {
   streak: number;
 }
 
+function getWeekStartKey(dateStr: string): string {
+  const date = new Date(dateStr);
+  const weekStart = new Date(date);
+  weekStart.setDate(date.getDate() - date.getDay());
+  return weekStart.toISOString().split('T')[0];
+}
+
+function getWeekLabel(weekStart: string): string {
+  const date = new Date(weekStart);
+  return date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+}
+
 const COLORS = ['#f97316', '#000000', '#fb923c', '#fdba74', '#fed7aa'];
 
 export default function DashboardPage() {
@@ -67,6 +91,8 @@ export default function DashboardPage() {
     flaggedMembers: 0,
   });
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
+  const [weeklyAttendanceData, setWeeklyAttendanceData] = useState<WeeklyAttendanceData[]>([]);
+  const [weeklyFirstTimerData, setWeeklyFirstTimerData] = useState<WeeklyFirstTimerData[]>([]);
   const [bacentaData, setBacentaData] = useState<{ name: string; value: number }[]>([]);
 
   // Shepherd state
@@ -105,6 +131,51 @@ export default function DashboardPage() {
       if (isDemo) loadDemoData();
       else fetchDashboardData();
     }
+  }, [profile, isDemo, authLoading]);
+
+  useEffect(() => {
+    if (authLoading || !profile || isDemo) return;
+
+    const refresh = () => {
+      if (profile.role === 'shepherd') {
+        fetchShepherdData();
+      } else if (profile.role === 'bishop') {
+        fetchBishopData();
+      } else {
+        fetchDashboardData();
+      }
+    };
+
+    const branchFilter = profile.role === 'bishop' ? undefined : `branch_id=eq.${profile.branch_id}`;
+    const channel = supabase.channel(`dashboard-live-${profile.id}-${profile.role}`);
+
+    const watchTable = (table: string) => {
+      channel.on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table,
+          filter: branchFilter,
+        },
+        refresh
+      );
+    };
+
+    watchTable('members');
+    watchTable('new_believers');
+    watchTable('first_timers');
+    watchTable('attendance');
+    watchTable('bacentas');
+    watchTable('profiles');
+    watchTable('alerts');
+    watchTable('branches');
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [profile, isDemo, authLoading]);
 
   async function fetchBishopData() {
@@ -267,6 +338,28 @@ export default function DashboardPage() {
     }
     setMonthlyData(months);
 
+    const demoWeeklyAttendance: WeeklyAttendanceData[] = [];
+    const demoWeeklyFirstTimers: WeeklyFirstTimerData[] = [];
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() - i * 7);
+      const present = Math.floor(Math.random() * 30) + 25;
+      const absent = Math.floor(Math.random() * 12) + 4;
+      const total = present + absent;
+      demoWeeklyAttendance.push({
+        week: getWeekLabel(weekStart.toISOString().split('T')[0]),
+        present,
+        absent,
+        attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
+      });
+      demoWeeklyFirstTimers.push({
+        week: getWeekLabel(weekStart.toISOString().split('T')[0]),
+        count: Math.floor(Math.random() * 6) + 1,
+      });
+    }
+    setWeeklyAttendanceData(demoWeeklyAttendance);
+    setWeeklyFirstTimerData(demoWeeklyFirstTimers);
+
     const bacentaCounts: Record<string, number> = {};
     DEMO_MEMBERS.forEach(m => {
       bacentaCounts[m.bacenta] = (bacentaCounts[m.bacenta] || 0) + 1;
@@ -330,6 +423,63 @@ export default function DashboardPage() {
 
     setMonthlyData(Object.values(months));
 
+    const eightWeeksAgo = new Date();
+    eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
+    const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
+
+    const [attendanceWeeklyRes, firstTimersWeeklyRes] = await Promise.all([
+      supabase
+        .from('attendance')
+        .select('date, is_present')
+        .eq('branch_id', branchId)
+        .gte('date', weeklyStartDate),
+      supabase
+        .from('first_timers')
+        .select('date_joined')
+        .eq('branch_id', branchId)
+        .gte('date_joined', weeklyStartDate),
+    ]);
+
+    const weekSeed: Record<string, WeeklyAttendanceData> = {};
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() - i * 7);
+      const key = weekStart.toISOString().split('T')[0];
+      weekSeed[key] = {
+        week: getWeekLabel(key),
+        present: 0,
+        absent: 0,
+        attendanceRate: 0,
+      };
+    }
+
+    attendanceWeeklyRes.data?.forEach((row: { date: string; is_present: boolean }) => {
+      const weekKey = getWeekStartKey(row.date);
+      if (!weekSeed[weekKey]) return;
+      if (row.is_present) weekSeed[weekKey].present += 1;
+      else weekSeed[weekKey].absent += 1;
+    });
+
+    const weeklyAttendance = Object.values(weekSeed).map((entry) => {
+      const total = entry.present + entry.absent;
+      return {
+        ...entry,
+        attendanceRate: total > 0 ? Math.round((entry.present / total) * 100) : 0,
+      };
+    });
+    setWeeklyAttendanceData(weeklyAttendance);
+
+    const firstTimerSeed: Record<string, WeeklyFirstTimerData> = {};
+    Object.keys(weekSeed).forEach((key) => {
+      firstTimerSeed[key] = { week: getWeekLabel(key), count: 0 };
+    });
+
+    firstTimersWeeklyRes.data?.forEach((row: { date_joined: string }) => {
+      const weekKey = getWeekStartKey(row.date_joined);
+      if (firstTimerSeed[weekKey]) firstTimerSeed[weekKey].count += 1;
+    });
+    setWeeklyFirstTimerData(Object.values(firstTimerSeed));
+
     const { data: membersData } = await supabase
       .from('members')
       .select('bacenta')
@@ -386,7 +536,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         {/* Shepherd Header */}
-        <div className="bg-gradient-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
+        <div className="bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
           <h1 className="text-2xl font-bold">My Sheep Fold 🐑</h1>
           <p className="text-orange-100 mt-1">
             {shepherdStats.totalSheep > 0
@@ -404,7 +554,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">Total Sheep</p>
                 <p className="text-2xl sm:text-3xl font-bold text-black mt-1">{shepherdStats.totalSheep}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center">
                 <Users size={20} className="text-white" />
               </div>
             </div>
@@ -415,7 +565,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">Faithful</p>
                 <p className="text-2xl sm:text-3xl font-bold text-green-600 mt-1">{shepherdStats.activeSheep}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-green-400 to-green-600 flex items-center justify-center">
                 <CheckCircle size={20} className="text-white" />
               </div>
             </div>
@@ -426,7 +576,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">At Risk</p>
                 <p className="text-2xl sm:text-3xl font-bold text-amber-600 mt-1">{shepherdStats.flaggedSheep}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-amber-100 to-amber-200 flex items-center justify-center">
                 <span className="text-lg sm:text-xl" role="img" aria-label="wolf chasing sheep">🐺🐑</span>
               </div>
             </div>
@@ -437,7 +587,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">Lost</p>
                 <p className="text-2xl sm:text-3xl font-bold text-red-600 mt-1">{shepherdStats.inactiveSheep}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-red-100 to-red-200 flex items-center justify-center">
                 <span className="text-lg sm:text-xl" role="img" aria-label="wolf eating sheep">🐺🍖</span>
               </div>
             </div>
@@ -482,7 +632,7 @@ export default function DashboardPage() {
                   href={`/dashboard/profile/member/${sheep.id}`}
                   className={`flex flex-col items-center p-3 rounded-xl border-2 ${color} hover:shadow-md transition`}
                 >
-                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full ring-2 ${ringColor} flex items-center justify-center overflow-hidden bg-gradient-to-br from-orange-400 to-orange-600`}>
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full ring-2 ${ringColor} flex items-center justify-center overflow-hidden bg-linear-to-br from-orange-400 to-orange-600`}>
                     {sheep.photo_url ? (
                       <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
                     ) : (
@@ -523,7 +673,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center overflow-hidden ring-2 ${
                         sheep.attendanceRate < 30 ? 'ring-red-400' : 'ring-amber-400'
-                      } bg-gradient-to-br from-orange-400 to-orange-600`}>
+                      } bg-linear-to-br from-orange-400 to-orange-600`}>
                         {sheep.photo_url ? (
                           <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
                         ) : (
@@ -565,7 +715,7 @@ export default function DashboardPage() {
           </Link>
           <Link
             href="/dashboard/attendance"
-            className="flex items-center justify-center gap-2 p-4 bg-gradient-to-r from-orange-400 to-orange-600 rounded-2xl shadow-sm hover:shadow-md transition text-sm font-medium text-white"
+            className="flex items-center justify-center gap-2 p-4 bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl shadow-sm hover:shadow-md transition text-sm font-medium text-white"
           >
             <CheckCircle size={18} />
             Mark Attendance
@@ -597,7 +747,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         {/* Recorder Header */}
-        <div className="bg-gradient-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
+        <div className="bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
           <h1 className="text-2xl font-bold">Recorder Dashboard 📋</h1>
           <p className="text-orange-100 mt-1">
             {profile.full_name}, you&apos;re helping build the Kingdom — one soul at a time
@@ -612,7 +762,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">New Believers</p>
                 <p className="text-2xl sm:text-3xl font-bold text-black mt-1">{totalNewBelievers}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center">
                 <Heart size={20} className="text-white" />
               </div>
             </div>
@@ -623,7 +773,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">First Timers</p>
                 <p className="text-2xl sm:text-3xl font-bold text-black mt-1">{totalFirstTimers}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-gray-700 to-black flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-gray-700 to-black flex items-center justify-center">
                 <UserPlus size={20} className="text-white" />
               </div>
             </div>
@@ -634,7 +784,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">Conversion</p>
                 <p className="text-2xl sm:text-3xl font-bold text-green-600 mt-1">{conversionRate}%</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-green-400 to-green-600 flex items-center justify-center">
                 <TrendingUp size={20} className="text-white" />
               </div>
             </div>
@@ -645,7 +795,7 @@ export default function DashboardPage() {
                 <p className="text-xs sm:text-sm text-gray-500 font-medium">This Month</p>
                 <p className="text-2xl sm:text-3xl font-bold text-orange-500 mt-1">{thisMonth}</p>
               </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-orange-300 to-orange-500 flex items-center justify-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-orange-300 to-orange-500 flex items-center justify-center">
                 <span className="text-white text-lg">🔥</span>
               </div>
             </div>
@@ -659,7 +809,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between gap-2 sm:gap-4">
             {/* New Believer stage */}
             <div className="flex-1 text-center">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center">
                 <span className="text-white text-lg sm:text-2xl font-bold">{totalNewBelievers}</span>
               </div>
               <p className="text-xs sm:text-sm font-medium text-gray-700 mt-2">New Believers</p>
@@ -672,7 +822,7 @@ export default function DashboardPage() {
             </div>
             {/* First Timer stage */}
             <div className="flex-1 text-center">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-gradient-to-br from-gray-700 to-black flex items-center justify-center">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-linear-to-br from-gray-700 to-black flex items-center justify-center">
                 <span className="text-white text-lg sm:text-2xl font-bold">{totalFirstTimers}</span>
               </div>
               <p className="text-xs sm:text-sm font-medium text-gray-700 mt-2">First Timers</p>
@@ -685,7 +835,7 @@ export default function DashboardPage() {
             </div>
             {/* Member stage */}
             <div className="flex-1 text-center">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-linear-to-br from-green-400 to-green-600 flex items-center justify-center">
                 <span className="text-white text-lg sm:text-2xl font-bold">{isDemo ? DEMO_MEMBERS.length : stats.members}</span>
               </div>
               <p className="text-xs sm:text-sm font-medium text-gray-700 mt-2">Members</p>
@@ -702,7 +852,7 @@ export default function DashboardPage() {
             {recentNB.map(nb => (
               <div key={nb.id} className="flex items-center justify-between p-3 rounded-xl bg-orange-50 border border-orange-100">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center">
                     <span className="text-white text-[10px] font-bold">
                       {nb.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                     </span>
@@ -718,7 +868,7 @@ export default function DashboardPage() {
             {recentFT.map(ft => (
               <div key={ft.id} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-200">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-gray-600 to-black flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-full bg-linear-to-br from-gray-600 to-black flex items-center justify-center">
                     <span className="text-white text-[10px] font-bold">
                       {ft.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                     </span>
@@ -738,7 +888,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-3">
           <Link
             href="/dashboard/new-believers"
-            className="flex items-center justify-center gap-2 p-4 bg-gradient-to-r from-orange-400 to-orange-600 rounded-2xl shadow-sm hover:shadow-md transition text-sm font-medium text-white"
+            className="flex items-center justify-center gap-2 p-4 bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl shadow-sm hover:shadow-md transition text-sm font-medium text-white"
           >
             <Heart size={18} />
             Record New Believer
@@ -772,7 +922,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         {/* Bishop Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-purple-800 rounded-2xl p-6 text-white">
+        <div className="bg-linear-to-r from-purple-600 to-purple-800 rounded-2xl p-6 text-white">
           <h1 className="text-2xl font-bold">Bishop&apos;s Command Center 🏛️</h1>
           <p className="text-purple-200 mt-1">Overseeing {branches.length} branches across the diocese</p>
         </div>
@@ -831,7 +981,7 @@ export default function DashboardPage() {
               return (
                 <div key={branch.id} className="border border-gray-100 rounded-xl p-4 hover:border-purple-200 transition">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-8 h-8 bg-gradient-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center">
+                    <div className="w-8 h-8 bg-linear-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center">
                       <Building2 size={14} className="text-white" />
                     </div>
                     <div>
@@ -931,7 +1081,7 @@ export default function DashboardPage() {
               if (!s) return null;
               return (
                 <div key={branch.id} className="flex items-center gap-3 p-3 bg-purple-50 rounded-xl">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-purple-400 to-purple-600 flex items-center justify-center shrink-0">
                     <span className="text-white text-xs font-bold">{s.shepherds}</span>
                   </div>
                   <div>
@@ -962,7 +1112,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="bg-gradient-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
+      <div className="bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
         <h1 className="text-2xl font-bold">Welcome back, {profile?.full_name?.split(' ')[0]} 👋</h1>
         <p className="text-orange-100 mt-1">Here&apos;s your church growth overview</p>
       </div>
@@ -993,7 +1143,7 @@ export default function DashboardPage() {
                 <p className="text-sm text-gray-500 font-medium">{card.label}</p>
                 <p className="text-3xl font-bold text-black mt-1">{card.value}</p>
               </div>
-              <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center shadow-sm`}>
+              <div className={`w-12 h-12 rounded-xl bg-linear-to-br ${card.color} flex items-center justify-center shadow-sm`}>
                 <card.icon size={22} className="text-white" />
               </div>
             </div>
@@ -1023,7 +1173,7 @@ export default function DashboardPage() {
               }
               return Object.entries(shepherdCounts).map(([id, { name, count }]) => (
                 <div key={id} className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-400 to-blue-600 flex items-center justify-center shrink-0">
                     <span className="text-white text-xs font-bold">🐑</span>
                   </div>
                   <div>
@@ -1047,7 +1197,7 @@ export default function DashboardPage() {
               }
               return Object.entries(recorderCounts).map(([id, { name, count }]) => (
                 <div key={id} className="flex items-center gap-3 p-3 bg-green-50 rounded-xl">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-green-400 to-green-600 flex items-center justify-center shrink-0">
                     <span className="text-white text-xs font-bold">📋</span>
                   </div>
                   <div>
@@ -1091,6 +1241,36 @@ export default function DashboardPage() {
               <Bar dataKey="newBelievers" fill="#f97316" name="New Believers" radius={[4, 4, 0, 0]} />
               <Bar dataKey="firstTimers" fill="#000000" name="First Timers" radius={[4, 4, 0, 0]} />
             </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Weekly Trend Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <h3 className="text-lg font-semibold text-black mb-4">Weekly Attendance Trend (8 Weeks)</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={weeklyAttendanceData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="week" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} />
+              <Tooltip />
+              <Bar dataKey="present" stackId="a" fill="#22c55e" name="Present" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="absent" stackId="a" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <h3 className="text-lg font-semibold text-black mb-4">Weekly First Timers (8 Weeks)</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={weeklyFirstTimerData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="week" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} />
+              <Tooltip />
+              <Line type="monotone" dataKey="count" stroke="#f97316" strokeWidth={3} dot={{ r: 4 }} name="First Timers" />
+            </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
@@ -1271,7 +1451,7 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
           )}
 
           <button type="submit" disabled={saving}
-            className="w-full py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50">
+            className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50">
             {saving ? 'Setting up...' : isAdminRole ? 'Create Branch & Open Dashboard' : 'Join Branch & Open Dashboard'}
           </button>
         </form>
@@ -1282,4 +1462,5 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
 
 function BranchSetup({ profile }: { profile: Profile }) { return <AccountSetup existingProfile={profile} />; }
 function ProfileRepair() { return <AccountSetup />; }
+
 

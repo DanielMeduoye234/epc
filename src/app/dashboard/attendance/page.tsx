@@ -1,10 +1,12 @@
 'use client';
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, @next/next/no-img-element */
 
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member } from '@/lib/types';
 import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
+import Link from 'next/link';
 import {
   CalendarCheck, Save, Eye, BarChart3, Users, TrendingUp, TrendingDown,
   ChevronDown, ChevronUp, Search, Grid3X3, ChevronLeft, ChevronRight,
@@ -55,7 +57,9 @@ export default function AttendancePage() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [shepherdStats, setShepherdStats] = useState<ShepherdStats[]>([]);
+  const [shepherdNameMap, setShepherdNameMap] = useState<Record<string, string>>({});
   const [expandedShepherd, setExpandedShepherd] = useState<string | null>(null);
+  const [selectedShepherdId, setSelectedShepherdId] = useState('');
 
   // Search/filter state (shepherd view)
   const [search, setSearch] = useState('');
@@ -76,6 +80,14 @@ export default function AttendancePage() {
   useEffect(() => {
     if (profile) {
       if (isDemo) {
+        const demoMap: Record<string, string> = {};
+        Object.entries(DEMO_USERS)
+          .filter(([, user]) => user.role === 'shepherd')
+          .forEach(([id, user]) => {
+            demoMap[id] = user.name;
+          });
+        setShepherdNameMap(demoMap);
+
         const membersWithHistory: MemberWithHistory[] = DEMO_MEMBERS.map(m => {
           const weeks: boolean[] = [];
           for (let i = 0; i < 6; i++) {
@@ -86,7 +98,7 @@ export default function AttendancePage() {
           return { ...m, recentWeeks: weeks };
         });
         setMembers(membersWithHistory);
-        if (isAdmin) buildShepherdStats(membersWithHistory);
+        if (isAdmin) buildShepherdStats(membersWithHistory, demoMap);
         setLoading(false);
       } else {
         fetchMembers();
@@ -102,7 +114,7 @@ export default function AttendancePage() {
     if (adminTab === 'tracker' && members.length > 0 && !isDemo) fetchTrackerAttendance();
   }, [adminTab, trackerYear, trackerMonth, members]);
 
-  function buildShepherdStats(allMembers: MemberWithHistory[]) {
+  function buildShepherdStats(allMembers: MemberWithHistory[], namesMap?: Record<string, string>) {
     const shepherdMap: Record<string, MemberWithHistory[]> = {};
     allMembers.forEach(m => {
       const sid = m.assigned_shepherd || 'unassigned';
@@ -111,7 +123,10 @@ export default function AttendancePage() {
     });
 
     const stats: ShepherdStats[] = Object.entries(shepherdMap).map(([sid, sheep]) => {
-      const name = isDemo ? (DEMO_USERS[sid]?.name || 'Unassigned') : sid;
+      const sourceNames = namesMap || shepherdNameMap;
+      const name = sid === 'unassigned'
+        ? 'Unassigned'
+        : sourceNames[sid] || (isDemo ? DEMO_USERS[sid]?.name || sid : sid);
       let faithful = 0, atRisk = 0, lost = 0;
       const weekTotals = [0, 0, 0, 0, 0, 0];
       const weekCounts = [0, 0, 0, 0, 0, 0];
@@ -141,6 +156,11 @@ export default function AttendancePage() {
 
     stats.sort((a, b) => b.avgAttendance - a.avgAttendance);
     setShepherdStats(stats);
+    setSelectedShepherdId((prev) => {
+      const exists = stats.some((s) => s.id === prev);
+      if (exists) return prev;
+      return stats[0]?.id || '';
+    });
   }
 
   async function fetchMembers() {
@@ -149,6 +169,21 @@ export default function AttendancePage() {
 
     const { data } = await query;
     const membersList = data || [];
+
+    let namesMap: Record<string, string> = shepherdNameMap;
+    if (isAdmin) {
+      const { data: shepherdProfiles } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('branch_id', profile!.branch_id)
+        .eq('role', 'shepherd');
+
+      namesMap = {};
+      (shepherdProfiles || []).forEach((sp: { id: string; full_name: string }) => {
+        namesMap[sp.id] = sp.full_name;
+      });
+      setShepherdNameMap(namesMap);
+    }
 
     const sixWeeksAgo = new Date();
     sixWeeksAgo.setDate(sixWeeksAgo.getDate() - 42);
@@ -180,9 +215,10 @@ export default function AttendancePage() {
       });
 
       setMembers(membersWithHistory);
-      if (isAdmin) buildShepherdStats(membersWithHistory);
+      if (isAdmin) buildShepherdStats(membersWithHistory, namesMap);
     } else {
       setMembers(membersList);
+      if (isAdmin) buildShepherdStats([], namesMap);
     }
     setLoading(false);
   }
@@ -335,12 +371,33 @@ export default function AttendancePage() {
     return (
       <div className="space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-black flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-black flex items-center gap-2">
             <BarChart3 className="text-orange-500" size={26} />
-            Attendance Analytics
-          </h1>
-          <p className="text-gray-500 mt-1">Church-wide attendance overview across all shepherds</p>
+            Shepherd&apos;s Data
+            </h1>
+            <p className="text-gray-500 mt-1">Church-wide attendance overview across all shepherds</p>
+          </div>
+          {shepherdStats.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedShepherdId}
+                onChange={(e) => setSelectedShepherdId(e.target.value)}
+                className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-black outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                {shepherdStats.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <Link
+                href={`/dashboard/shepherds${selectedShepherdId ? `?shepherdId=${encodeURIComponent(selectedShepherdId)}` : ''}`}
+                className="px-3 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition"
+              >
+                View Performance
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -382,7 +439,7 @@ export default function AttendancePage() {
                 <p className="text-xs text-gray-500 uppercase">Overall Attendance</p>
                 <p className="text-2xl font-bold text-orange-500 mt-1">{overallAttendance}%</p>
                 <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
-                  <div className="bg-gradient-to-r from-orange-400 to-orange-600 h-1.5 rounded-full" style={{ width: `${overallAttendance}%` }}></div>
+                  <div className="bg-linear-to-r from-orange-400 to-orange-600 h-1.5 rounded-full" style={{ width: `${overallAttendance}%` }}></div>
                 </div>
               </div>
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -430,9 +487,9 @@ export default function AttendancePage() {
                         >
                           <div className="flex items-center gap-3 sm:gap-4">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                              idx === 0 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' :
-                              idx === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-500' :
-                              'bg-gradient-to-br from-orange-400 to-orange-600'
+                              idx === 0 ? 'bg-linear-to-br from-yellow-400 to-orange-500' :
+                              idx === 1 ? 'bg-linear-to-br from-gray-300 to-gray-500' :
+                              'bg-linear-to-br from-orange-400 to-orange-600'
                             }`}>
                               {shepherd.name.split(' ').pop()?.[0] || '?'}
                             </div>
@@ -447,14 +504,14 @@ export default function AttendancePage() {
                               {shepherd.weeklyRates.map((rate, i) => (
                                 <div
                                   key={i}
-                                  className="w-2 rounded-t bg-gradient-to-t from-orange-400 to-orange-300 transition-all"
+                                  className="w-2 rounded-t bg-linear-to-t from-orange-400 to-orange-300 transition-all"
                                   style={{ height: `${Math.max(rate * 0.24, 2)}px` }}
                                   title={`Week ${i + 1}: ${rate}%`}
                                 />
                               ))}
                             </div>
 
-                            <div className="text-right min-w-[60px]">
+                            <div className="text-right min-w-15">
                               <p className={`text-lg font-bold ${
                                 shepherd.avgAttendance >= 70 ? 'text-green-600' :
                                 shepherd.avgAttendance >= 40 ? 'text-amber-500' : 'text-red-500'
@@ -497,8 +554,8 @@ export default function AttendancePage() {
                                                  faith === 'at-risk' ? 'ring-amber-400' :
                                                  faith === 'lost' ? 'ring-red-400' : 'ring-gray-300';
                                 return (
-                                  <div key={sheep.id} className="flex flex-col items-center p-2 bg-white rounded-lg border border-gray-100 min-w-[56px]">
-                                    <div className={`w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center ring-2 ${ringColor} overflow-hidden`}>
+                                  <div key={sheep.id} className="flex flex-col items-center p-2 bg-white rounded-lg border border-gray-100 min-w-14">
+                                    <div className={`w-8 h-8 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center ring-2 ${ringColor} overflow-hidden`}>
                                       {sheep.photo_url ? (
                                         <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
                                       ) : (
@@ -539,9 +596,9 @@ export default function AttendancePage() {
                   return (
                     <div key={i} className="flex flex-col items-center flex-1">
                       <span className="text-[10px] text-gray-500 mb-1">{totalRate}%</span>
-                      <div className="w-full max-w-[32px] bg-gray-100 rounded-t-md relative" style={{ height: '100px' }}>
+                      <div className="w-full max-w-8 bg-gray-100 rounded-t-md relative" style={{ height: '100px' }}>
                         <div
-                          className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-orange-500 to-orange-300 rounded-t-md transition-all"
+                          className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-orange-500 to-orange-300 rounded-t-md transition-all"
                           style={{ height: `${totalRate}%` }}
                         ></div>
                       </div>
@@ -569,7 +626,7 @@ export default function AttendancePage() {
                 >
                   <ChevronLeft size={18} />
                 </button>
-                <span className="font-bold text-black min-w-[140px] text-center text-sm">
+                <span className="font-bold text-black min-w-35 text-center text-sm">
                   {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
                 </span>
                 <button
@@ -729,7 +786,7 @@ export default function AttendancePage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-black">Attendance</h1>
+          <h1 className="text-2xl font-bold text-black">Shepherd&apos;s Data</h1>
           <p className="text-gray-500 mt-1">Mark weekly attendance for your sheep</p>
         </div>
         <div className="flex items-center gap-3">
@@ -742,7 +799,7 @@ export default function AttendancePage() {
           <button
             onClick={handleSave}
             disabled={saving || members.length === 0}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
           >
             <Save size={18} />
             {saving ? 'Saving...' : 'Save'}
@@ -814,7 +871,7 @@ export default function AttendancePage() {
                 <div
                   key={member.id}
                   onClick={() => toggleAttendance(member.id)}
-                  className={`relative flex flex-col items-center p-2 rounded-lg border ${bgColor} cursor-pointer hover:shadow-sm transition min-w-[52px]`}
+                  className={`relative flex flex-col items-center p-2 rounded-lg border ${bgColor} cursor-pointer hover:shadow-sm transition min-w-13`}
                 >
                   {todayMarked !== undefined && (
                     <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
@@ -823,7 +880,7 @@ export default function AttendancePage() {
                       {todayMarked ? '✓' : '✗'}
                     </div>
                   )}
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center overflow-hidden">
+                  <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center overflow-hidden">
                     {member.photo_url ? (
                       <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
                     ) : (
@@ -887,7 +944,7 @@ export default function AttendancePage() {
                 className={`flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-gray-50 transition cursor-pointer active:bg-orange-50 border-l-4 ${borderAccent}`}
               >
                 <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                     {member.photo_url ? (
                       <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
                     ) : (
@@ -933,3 +990,4 @@ export default function AttendancePage() {
     </div>
   );
 }
+

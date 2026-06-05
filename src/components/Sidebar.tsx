@@ -24,7 +24,7 @@ import {
   FileText,
   ClipboardList,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['bishop', 'super_admin', 'shepherd', 'recorder'] },
@@ -35,7 +35,7 @@ const navigation = [
   { name: 'Bacentas', href: '/dashboard/bacentas', icon: FolderTree, roles: ['bishop', 'super_admin'] },
   { name: 'Shepherds', href: '/dashboard/shepherds', icon: Users, roles: ['bishop', 'super_admin'] },
   { name: 'Church Attendance', href: '/dashboard/church-attendance', icon: ClipboardList, roles: ['bishop', 'super_admin'] },
-  { name: 'Attendance', href: '/dashboard/attendance', icon: CalendarCheck, roles: ['bishop', 'super_admin', 'shepherd'] },
+  { name: "Shepherd's Data", href: '/dashboard/attendance', icon: CalendarCheck, roles: ['bishop', 'super_admin', 'shepherd'] },
   { name: 'Alerts', href: '/dashboard/alerts', icon: Bell, roles: ['bishop', 'super_admin', 'shepherd'] },
   { name: 'Follow-ups', href: '/dashboard/follow-ups', icon: Phone, roles: ['bishop', 'super_admin', 'shepherd'] },
   { name: 'Visitations', href: '/dashboard/visitations', icon: MapPin, roles: ['bishop', 'super_admin', 'shepherd'] },
@@ -56,6 +56,10 @@ export default function Sidebar() {
   const filteredNav = navigation.filter(
     (item) => profile && item.roles.includes(profile.role)
   );
+
+  useEffect(() => {
+    filteredNav.forEach((item) => router.prefetch(item.href));
+  }, [router, filteredNav]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

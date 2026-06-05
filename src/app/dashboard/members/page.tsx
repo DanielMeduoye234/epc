@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, MemberStatus, Bacenta } from '@/lib/types';
 import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
 import { Search, Users, Plus, X, Lock, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import BacentaSelect from '@/components/BacentaSelect';
 
 interface MemberWithShepherd extends Member {
   shepherd_name?: string;
@@ -22,6 +23,7 @@ export default function MembersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editMember, setEditMember] = useState<MemberWithShepherd | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [addForm, setAddForm] = useState({
     full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '',
   });
@@ -71,6 +73,13 @@ export default function MembersPage() {
     setLoading(false);
   }
 
+  useEffect(() => {
+    if (!profile) return;
+    if (isDemo) return;
+    supabase.from('bacentas').select('*').eq('branch_id', profile.branch_id).order('name')
+      .then(({ data }: { data: Bacenta[] | null }) => setBacentas(data || []));
+  }, [profile, isDemo]);
+
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
     if (!addForm.full_name || !addForm.phone_number) return;
@@ -84,7 +93,7 @@ export default function MembersPage() {
         bacenta: addForm.bacenta || 'Unassigned', who_brought: addForm.who_brought,
         date_joined: new Date().toISOString().split('T')[0],
         membership_date: new Date().toISOString().split('T')[0],
-        assigned_shepherd: profile!.id, branch_id: profile!.branch_id,
+        assigned_shepherd: profile!.role === 'shepherd' ? profile!.id : null, branch_id: profile!.branch_id,
         status: 'active', photo_url: null, created_at: new Date().toISOString(),
       };
       setMembers(prev => [newMember, ...prev]);
@@ -95,7 +104,7 @@ export default function MembersPage() {
         who_brought: addForm.who_brought,
         date_joined: new Date().toISOString().split('T')[0],
         membership_date: new Date().toISOString().split('T')[0],
-        assigned_shepherd: profile!.id, branch_id: profile!.branch_id, status: 'active',
+        assigned_shepherd: profile!.role === 'shepherd' ? profile!.id : null, branch_id: profile!.branch_id, status: 'active',
       });
       fetchMembers();
     }
@@ -130,6 +139,24 @@ export default function MembersPage() {
 
   const deletingMember = members.find(m => m.id === deleteId);
 
+  const addMemberBacentas = useMemo(() => {
+    const map = new Map<string, Bacenta>();
+    bacentas.forEach((b) => map.set(b.name, b));
+    members.forEach((m) => {
+      if (!map.has(m.bacenta)) {
+        map.set(m.bacenta, {
+          id: `fallback-${m.bacenta}`,
+          name: m.bacenta,
+          leader_name: null,
+          location: null,
+          branch_id: m.branch_id,
+          created_at: new Date().toISOString(),
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [bacentas, members]);
+
   if (profile?.role === 'recorder') {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center px-4">
@@ -158,10 +185,10 @@ export default function MembersPage() {
             <Users size={20} className="text-gray-400" />
             <span className="text-sm text-gray-500">{filtered.length} members</span>
           </div>
-          {profile?.role === 'shepherd' && (
+          {(profile?.role === 'shepherd' || profile?.role === 'super_admin' || profile?.role === 'bishop') && (
             <button onClick={() => setShowAddModal(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition">
-              <Plus size={16} /> Add Sheep
+              <Plus size={16} /> {profile?.role === 'shepherd' ? 'Add Sheep' : 'Add Member'}
             </button>
           )}
         </div>
@@ -322,13 +349,13 @@ export default function MembersPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-black">Add New Sheep</h2>
+              <h2 className="text-lg font-bold text-black">{profile?.role === 'shepherd' ? 'Add New Sheep' : 'Add New Member'}</h2>
               <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition">
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
             <form onSubmit={handleAddMember} className="p-5 space-y-4">
-              {(['full_name', 'phone_number', 'address', 'bacenta', 'who_brought'] as const).map((field) => (
+              {(['full_name', 'phone_number', 'address', 'who_brought'] as const).map((field) => (
                 <div key={field}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     {field === 'full_name' ? 'Full Name *' : field === 'phone_number' ? 'Phone Number *' : field === 'who_brought' ? 'Who Brought Them' : field.charAt(0).toUpperCase() + field.slice(1)}
@@ -343,9 +370,18 @@ export default function MembersPage() {
                   />
                 </div>
               ))}
+              <BacentaSelect
+                label="Bacenta"
+                value={addForm.bacenta}
+                onChange={(value) => setAddForm((prev) => ({ ...prev, bacenta: value }))}
+                bacentas={addMemberBacentas}
+                includeLeader
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
+                placeholder="Select a bacenta..."
+              />
               <button type="submit" disabled={adding}
                 className="w-full py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50">
-                {adding ? 'Adding...' : 'Add to My Sheep'}
+                {adding ? 'Adding...' : profile?.role === 'shepherd' ? 'Add to My Sheep' : 'Add Member'}
               </button>
             </form>
           </div>

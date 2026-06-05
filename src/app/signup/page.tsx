@@ -40,25 +40,12 @@ export default function SignupPage() {
       return;
     }
 
-    // For shepherd/recorder: look up the branch by code first
-    let branchId: string | null = null;
     if (needsBranchCode) {
       if (!branchCode.trim()) {
         setError('Please enter the branch code provided by your admin.');
         setLoading(false);
         return;
       }
-      const { data: branch } = await supabase
-        .from('branches')
-        .select('id')
-        .ilike('branch_code', branchCode.trim())
-        .maybeSingle();
-      if (!branch) {
-        setError('Branch code not found. Please check with your admin and try again.');
-        setLoading(false);
-        return;
-      }
-      branchId = branch.id;
     }
 
     const { data, error: signUpError } = await supabase.auth.signUp({
@@ -83,7 +70,7 @@ export default function SignupPage() {
         email,
         role,
       };
-      if (branchId) profileBody.branch_id = branchId;
+      if (needsBranchCode) profileBody.branchCode = branchCode.trim();
 
       const res = await fetch('/api/auth/create-profile', {
         method: 'POST',

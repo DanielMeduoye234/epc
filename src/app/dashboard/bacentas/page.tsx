@@ -89,11 +89,32 @@ export default function BacentasPage() {
     }
 
     if (editingId) {
+      const current = bacentas.find((b) => b.id === editingId);
       await supabase.from('bacentas').update({
         name: form.name,
         leader_name: form.leader_name || null,
         location: form.location || null,
       }).eq('id', editingId);
+
+      if (current && current.name !== form.name) {
+        await Promise.all([
+          supabase
+            .from('members')
+            .update({ bacenta: form.name })
+            .eq('branch_id', profile!.branch_id)
+            .eq('bacenta', current.name),
+          supabase
+            .from('first_timers')
+            .update({ bacenta: form.name })
+            .eq('branch_id', profile!.branch_id)
+            .eq('bacenta', current.name),
+          supabase
+            .from('new_believers')
+            .update({ bacenta: form.name })
+            .eq('branch_id', profile!.branch_id)
+            .eq('bacenta', current.name),
+        ]);
+      }
     } else {
       await supabase.from('bacentas').insert({
         name: form.name,

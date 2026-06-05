@@ -31,6 +31,12 @@ export const DEMO_PROFILE: Profile = {
   },
 };
 
+export const DEMO_BACENTAS = [
+  { id: 'bac-1', name: 'Bacenta Alpha', leader_name: 'Brother Samuel', location: 'Zone A, Lagos', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
+  { id: 'bac-2', name: 'Bacenta Beta', leader_name: 'Sister Joy', location: 'Zone B, Ikeja', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
+  { id: 'bac-3', name: 'Bacenta Omega', leader_name: 'Brother Daniel', location: 'Zone C, Lekki', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z' },
+];
+
 export const DEMO_NEW_BELIEVERS: NewBeliever[] = [
   { id: 'nb-1', full_name: 'Grace Adeyemi', first_name: 'Grace', last_name: 'Adeyemi', nickname: null, birthday: null, address: '12 Harmony Street, Lagos', bacenta: 'Bacenta Alpha', phone_number: '+2348012345678', who_brought: 'Sister Joy', date_saved: '2026-05-10', branch_id: 'demo-branch-001', recorded_by: 'demo-recorder-001', photo_url: null, created_at: '2026-05-10T10:00:00Z' },
   { id: 'nb-2', full_name: 'David Okonkwo', first_name: 'David', last_name: 'Okonkwo', nickname: null, birthday: null, address: '5 Unity Lane, Ikeja', bacenta: 'Bacenta Omega', phone_number: '+2348087654321', who_brought: 'Brother Samuel', date_saved: '2026-05-08', branch_id: 'demo-branch-001', recorded_by: 'demo-recorder-001', photo_url: null, created_at: '2026-05-08T10:00:00Z' },
