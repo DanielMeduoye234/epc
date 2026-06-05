@@ -181,7 +181,7 @@ export default function ReportsPage() {
       status: m.status,
       bacenta: m.bacenta,
       date_joined: m.date_joined || '',
-      birthday: m.birthday,
+      birthday: m.birthday ?? null,
     })) : membersRows,
     attendance: isDemo ? DEMO_ATTENDANCE.map((a) => ({
       member_name: DEMO_MEMBERS.find((m) => m.id === a.member_id)?.full_name || 'Unknown',
@@ -189,8 +189,8 @@ export default function ReportsPage() {
       status: a.status,
     })) : attendanceRows,
     followUps: isDemo ? DEMO_FOLLOWUPS.map((f) => ({
-      member_name: f.member_name,
-      shepherd_name: f.shepherd_name,
+      member_name: f.member_name || 'Unknown',
+      shepherd_name: f.shepherd_name || 'Unknown',
       type: f.type,
       status: f.status,
       date: f.date,
@@ -338,7 +338,7 @@ export default function ReportsPage() {
       <button
         onClick={generateCSV}
         disabled={generating || (!isDemo && !profile?.branch_id)}
-        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-xl hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-xl hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
       >
         {generating ? (
           <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
