@@ -353,6 +353,24 @@ export default function ChurchAttendancePage() {
     return { present, absent, unmarked };
   }, [trackerMembers, attendanceMap, selectedSunday]);
 
+  const sundayRecords = useMemo(() => {
+    const scopedMembers = members.filter((m) => trackerBacenta === 'all' || m.bacenta === trackerBacenta);
+    return sundays.map((s) => {
+      const dayKey = toDateStr(s);
+      const present = scopedMembers.filter((m) => (attendanceMap[m.id] || {})[dayKey] === true).length;
+      const absent = scopedMembers.filter((m) => (attendanceMap[m.id] || {})[dayKey] === false).length;
+      const total = present + absent;
+      return {
+        dayKey,
+        label: s.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short' }),
+        present,
+        absent,
+        total,
+        attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
+      };
+    });
+  }, [sundays, members, trackerBacenta, attendanceMap]);
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
@@ -703,6 +721,42 @@ export default function ChurchAttendancePage() {
               </div>
             </div>
           )}
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <h3 className="text-sm font-semibold text-black">Sunday Records (Stored Attendance)</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Present and absent totals saved for each Sunday in this month.</p>
+            </div>
+            {sundayRecords.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-400">No Sundays in this month.</div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {sundayRecords.map((record) => (
+                  <button
+                    key={record.dayKey}
+                    onClick={() => setSelectedSunday(record.dayKey)}
+                    className={`w-full px-4 py-3 text-left transition ${
+                      selectedSunday === record.dayKey ? 'bg-orange-50' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-black">{record.label}</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Total in church: <span className="font-semibold text-gray-700">{record.total}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
+                        <span className="text-green-700">Present: {record.present}</span>
+                        <span className="text-red-600">Absent: {record.absent}</span>
+                        <span className="text-gray-600">Rate: {record.attendanceRate}%</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {loadingAtt ? (
             <div className="flex justify-center py-16">
