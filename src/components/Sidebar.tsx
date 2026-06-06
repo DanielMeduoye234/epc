@@ -93,7 +93,7 @@ export default function Sidebar() {
               onClick={() => setMobileOpen(false)}
               className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition ${
                 isActive
-                  ? 'bg-gradient-to-r from-orange-400 to-orange-600 text-white'
+                  ? 'bg-linear-to-r from-orange-400 to-orange-600 text-white'
                   : 'text-gray-700 hover:bg-orange-50 hover:text-orange-600'
               }`}
             >

@@ -9,7 +9,7 @@ import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
 import Link from 'next/link';
 import {
   CalendarCheck, Save, Eye, BarChart3, Users, TrendingUp, TrendingDown,
-  ChevronDown, ChevronUp, Search, Grid3X3, ChevronLeft, ChevronRight,
+  ChevronDown, ChevronUp, Search,
 } from 'lucide-react';
 import React from 'react';
 
@@ -27,24 +27,6 @@ interface ShepherdStats {
   avgAttendance: number;
   weeklyRates: number[];
 }
-
-function getSundaysFromMonth(year: number, month: number): Date[] {
-  const sundays: Date[] = [];
-  const d = new Date(year, month, 1);
-  while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
-  const end = new Date(year, month + 1, 0); // last day of selected month
-  while (d <= end) {
-    sundays.push(new Date(d));
-    d.setDate(d.getDate() + 7);
-  }
-  return sundays;
-}
-
-function toDateStr(d: Date) {
-  return d.toISOString().split('T')[0];
-}
-
-type AdminTab = 'overview' | 'tracker';
 
 export default function AttendancePage() {
   const { profile, isDemo } = useAuth();
@@ -64,16 +46,6 @@ export default function AttendancePage() {
   // Search/filter state (shepherd view)
   const [search, setSearch] = useState('');
   const [bacentaFilter, setBacentaFilter] = useState('all');
-
-  // Admin tab
-  const [adminTab, setAdminTab] = useState<AdminTab>('overview');
-
-  // Tracker state
-  const [trackerYear, setTrackerYear] = useState(new Date().getFullYear());
-  const [trackerMonth, setTrackerMonth] = useState(new Date().getMonth());
-  const [trackerBacenta, setTrackerBacenta] = useState('all');
-  const [trackerAtt, setTrackerAtt] = useState<Record<string, Record<string, boolean>>>({});
-  const [loadingTracker, setLoadingTracker] = useState(false);
 
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'bishop';
 
@@ -109,10 +81,6 @@ export default function AttendancePage() {
   useEffect(() => {
     if (profile && members.length > 0 && !isDemo && !isAdmin) fetchExistingAttendance();
   }, [date, members]);
-
-  useEffect(() => {
-    if (adminTab === 'tracker' && members.length > 0 && !isDemo) fetchTrackerAttendance();
-  }, [adminTab, trackerYear, trackerMonth, members]);
 
   function buildShepherdStats(allMembers: MemberWithHistory[], namesMap?: Record<string, string>) {
     const shepherdMap: Record<string, MemberWithHistory[]> = {};
@@ -223,27 +191,6 @@ export default function AttendancePage() {
     setLoading(false);
   }
 
-  async function fetchTrackerAttendance() {
-    setLoadingTracker(true);
-    const startDate = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-01`;
-    const lastDay = new Date(trackerYear, trackerMonth + 1, 0).getDate();
-    const endDate = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-    const { data } = await supabase
-      .from('attendance')
-      .select('person_id, date, is_present')
-      .in('person_id', members.map(m => m.id))
-      .gte('date', startDate)
-      .lte('date', endDate);
-
-    const map: Record<string, Record<string, boolean>> = {};
-    data?.forEach((a: { person_id: string; date: string; is_present: boolean }) => {
-      if (!map[a.person_id]) map[a.person_id] = {};
-      map[a.person_id][a.date] = a.is_present;
-    });
-    setTrackerAtt(map);
-    setLoadingTracker(false);
-  }
-
   function getWeekKey(dateStr: string): string {
     const d = new Date(dateStr);
     const start = new Date(d);
@@ -326,32 +273,6 @@ export default function AttendancePage() {
     );
   }, [members, search, bacentaFilter]);
 
-  // Tracker computed values
-  const sundays = useMemo(() => getSundaysFromMonth(trackerYear, trackerMonth), [trackerYear, trackerMonth]);
-  const sundaysByMonth = useMemo(() => {
-    const groups: { label: string; dates: Date[] }[] = [];
-    sundays.forEach(s => {
-      const lbl = s.toLocaleString('en', { month: 'short', year: '2-digit' });
-      const last = groups[groups.length - 1];
-      if (last && last.label === lbl) last.dates.push(s);
-      else groups.push({ label: lbl, dates: [s] });
-    });
-    return groups;
-  }, [sundays]);
-
-  const allBacentas = useMemo(() => {
-    const s = new Set(members.map(m => m.bacenta).filter(Boolean));
-    return Array.from(s).sort();
-  }, [members]);
-
-  const trackerMembers = useMemo(() =>
-    members.filter(m => trackerBacenta === 'all' || m.bacenta === trackerBacenta),
-    [members, trackerBacenta]);
-
-  const trackerBacentaList = useMemo(() =>
-    allBacentas.filter(b => trackerBacenta === 'all' || b === trackerBacenta),
-    [allBacentas, trackerBacenta]);
-
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
@@ -400,33 +321,8 @@ export default function AttendancePage() {
           )}
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 border-b border-gray-200">
-          <button
-            onClick={() => setAdminTab('overview')}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition ${
-              adminTab === 'overview' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <BarChart3 size={15} />
-            Overview
-          </button>
-          <button
-            onClick={() => setAdminTab('tracker')}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition ${
-              adminTab === 'tracker' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <Grid3X3 size={15} />
-            Attendance Tracker
-          </button>
-        </div>
-
-        {/* Overview tab */}
-        {adminTab === 'overview' && (
-          <>
-            {/* Overall Stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        {/* Overall Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                 <p className="text-xs text-gray-500 uppercase">Total Members</p>
                 <p className="text-2xl font-bold text-black mt-1">{totalSheep}</p>
@@ -454,326 +350,136 @@ export default function AttendancePage() {
                   <span className="text-amber-500">{totalAtRisk} at risk</span> · <span className="text-red-500">{totalLost} lost</span>
                 </p>
               </div>
+        </div>
+
+        {/* Per-Shepherd Breakdown */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
+            <h3 className="font-semibold text-black flex items-center gap-2">
+              <Eye size={18} className="text-orange-500" />
+              Shepherd Performance
+            </h3>
+            <p className="text-xs text-gray-400 mt-0.5">Click a shepherd to see their flock breakdown</p>
+          </div>
+
+          {shepherdStats.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              No shepherd data yet. Add members and mark attendance to see stats here.
             </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {shepherdStats.map((shepherd, idx) => {
+                const isExpanded = expandedShepherd === shepherd.id;
+                const trend = shepherd.weeklyRates.length >= 2
+                  ? shepherd.weeklyRates[shepherd.weeklyRates.length - 1] - shepherd.weeklyRates[shepherd.weeklyRates.length - 2]
+                  : 0;
+                const sheepForShepherd = members.filter(m => (m.assigned_shepherd || 'unassigned') === shepherd.id);
 
-            {/* Per-Shepherd Breakdown */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
-                <h3 className="font-semibold text-black flex items-center gap-2">
-                  <Eye size={18} className="text-orange-500" />
-                  Shepherd Performance
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">Click a shepherd to see their flock breakdown</p>
-              </div>
+                return (
+                  <div key={shepherd.id}>
+                    <div
+                      onClick={() => setExpandedShepherd(isExpanded ? null : shepherd.id)}
+                      className="flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-gray-50 cursor-pointer transition"
+                    >
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                          idx === 0 ? 'bg-linear-to-br from-yellow-400 to-orange-500' :
+                          idx === 1 ? 'bg-linear-to-br from-gray-300 to-gray-500' :
+                          'bg-linear-to-br from-orange-400 to-orange-600'
+                        }`}>
+                          {shepherd.name.split(' ').pop()?.[0] || '?'}
+                        </div>
+                        <div>
+                          <p className="font-medium text-black text-sm sm:text-base">{shepherd.name}</p>
+                          <p className="text-xs text-gray-500">{shepherd.totalSheep} sheep</p>
+                        </div>
+                      </div>
 
-              {shepherdStats.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 text-sm">
-                  No shepherd data yet. Add members and mark attendance to see stats here.
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-50">
-                  {shepherdStats.map((shepherd, idx) => {
-                    const isExpanded = expandedShepherd === shepherd.id;
-                    const trend = shepherd.weeklyRates.length >= 2
-                      ? shepherd.weeklyRates[shepherd.weeklyRates.length - 1] - shepherd.weeklyRates[shepherd.weeklyRates.length - 2]
-                      : 0;
-                    const sheepForShepherd = members.filter(m => (m.assigned_shepherd || 'unassigned') === shepherd.id);
+                      <div className="flex items-center gap-4">
+                        <div className="hidden sm:flex items-end gap-0.5 h-6">
+                          {shepherd.weeklyRates.map((rate, i) => (
+                            <div
+                              key={i}
+                              className="w-2 rounded-t bg-linear-to-t from-orange-400 to-orange-300 transition-all"
+                              style={{ height: `${Math.max(rate * 0.24, 2)}px` }}
+                              title={`Week ${i + 1}: ${rate}%`}
+                            />
+                          ))}
+                        </div>
 
-                    return (
-                      <div key={shepherd.id}>
-                        <div
-                          onClick={() => setExpandedShepherd(isExpanded ? null : shepherd.id)}
-                          className="flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-gray-50 cursor-pointer transition"
-                        >
-                          <div className="flex items-center gap-3 sm:gap-4">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                              idx === 0 ? 'bg-linear-to-br from-yellow-400 to-orange-500' :
-                              idx === 1 ? 'bg-linear-to-br from-gray-300 to-gray-500' :
-                              'bg-linear-to-br from-orange-400 to-orange-600'
-                            }`}>
-                              {shepherd.name.split(' ').pop()?.[0] || '?'}
+                        <div className="text-right min-w-15">
+                          <p className={`text-lg font-bold ${
+                            shepherd.avgAttendance >= 70 ? 'text-green-600' :
+                            shepherd.avgAttendance >= 40 ? 'text-amber-500' : 'text-red-500'
+                          }`}>
+                            {shepherd.avgAttendance}%
+                          </p>
+                          {trend !== 0 && (
+                            <div className={`flex items-center justify-end gap-0.5 text-[10px] ${trend > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {trend > 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                              {Math.abs(trend)}%
                             </div>
-                            <div>
-                              <p className="font-medium text-black text-sm sm:text-base">{shepherd.name}</p>
-                              <p className="text-xs text-gray-500">{shepherd.totalSheep} sheep</p>
-                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-1">
+                          <div className="flex items-center gap-0.5">
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            <span className="text-[10px] text-gray-600">{shepherd.faithful}</span>
                           </div>
-
-                          <div className="flex items-center gap-4">
-                            <div className="hidden sm:flex items-end gap-0.5 h-6">
-                              {shepherd.weeklyRates.map((rate, i) => (
-                                <div
-                                  key={i}
-                                  className="w-2 rounded-t bg-linear-to-t from-orange-400 to-orange-300 transition-all"
-                                  style={{ height: `${Math.max(rate * 0.24, 2)}px` }}
-                                  title={`Week ${i + 1}: ${rate}%`}
-                                />
-                              ))}
-                            </div>
-
-                            <div className="text-right min-w-15">
-                              <p className={`text-lg font-bold ${
-                                shepherd.avgAttendance >= 70 ? 'text-green-600' :
-                                shepherd.avgAttendance >= 40 ? 'text-amber-500' : 'text-red-500'
-                              }`}>
-                                {shepherd.avgAttendance}%
-                              </p>
-                              {trend !== 0 && (
-                                <div className={`flex items-center justify-end gap-0.5 text-[10px] ${trend > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {trend > 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                  {Math.abs(trend)}%
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex gap-1">
-                              <div className="flex items-center gap-0.5">
-                                <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                                <span className="text-[10px] text-gray-600">{shepherd.faithful}</span>
-                              </div>
-                              <div className="flex items-center gap-0.5">
-                                <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                                <span className="text-[10px] text-gray-600">{shepherd.atRisk}</span>
-                              </div>
-                              <div className="flex items-center gap-0.5">
-                                <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                                <span className="text-[10px] text-gray-600">{shepherd.lost}</span>
-                              </div>
-                            </div>
-
-                            {isExpanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                          <div className="flex items-center gap-0.5">
+                            <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                            <span className="text-[10px] text-gray-600">{shepherd.atRisk}</span>
+                          </div>
+                          <div className="flex items-center gap-0.5">
+                            <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                            <span className="text-[10px] text-gray-600">{shepherd.lost}</span>
                           </div>
                         </div>
 
-                        {isExpanded && (
-                          <div className="bg-gray-50 px-4 sm:px-6 py-3 border-t border-gray-100">
-                            <div className="flex flex-wrap gap-2">
-                              {sheepForShepherd.map(sheep => {
-                                const faith = getFaithfulness(sheep);
-                                const ringColor = faith === 'faithful' ? 'ring-green-400' :
-                                                 faith === 'at-risk' ? 'ring-amber-400' :
-                                                 faith === 'lost' ? 'ring-red-400' : 'ring-gray-300';
-                                return (
-                                  <div key={sheep.id} className="flex flex-col items-center p-2 bg-white rounded-lg border border-gray-100 min-w-14">
-                                    <div className={`w-8 h-8 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center ring-2 ${ringColor} overflow-hidden`}>
-                                      {sheep.photo_url ? (
-                                        <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
-                                      ) : (
-                                        <span className="text-white text-[9px] font-bold">
-                                          {sheep.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="text-[9px] text-gray-700 mt-1 text-center truncate w-full">{sheep.full_name.split(' ')[0]}</p>
-                                    {sheep.recentWeeks && (
-                                      <div className="flex gap-0.5 mt-0.5">
-                                        {sheep.recentWeeks.slice(-4).map((present, i) => (
-                                          <div key={i} className={`w-1.5 h-1.5 rounded-full ${present ? 'bg-green-500' : 'bg-red-400'}`}></div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
+                        {isExpanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Church-wide Weekly Trend */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6">
-              <h3 className="font-semibold text-black text-sm mb-4">Weekly Attendance Trend (All Shepherds)</h3>
-              <div className="flex items-end justify-between gap-2 h-32">
-                {['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4', 'Wk 5', 'Wk 6'].map((label, i) => {
-                  const totalRate = shepherdStats.length > 0
-                    ? Math.round(shepherdStats.reduce((s, sh) => s + (sh.weeklyRates[i] || 0), 0) / shepherdStats.length)
-                    : 0;
-                  return (
-                    <div key={i} className="flex flex-col items-center flex-1">
-                      <span className="text-[10px] text-gray-500 mb-1">{totalRate}%</span>
-                      <div className="w-full max-w-8 bg-gray-100 rounded-t-md relative" style={{ height: '100px' }}>
-                        <div
-                          className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-orange-500 to-orange-300 rounded-t-md transition-all"
-                          style={{ height: `${totalRate}%` }}
-                        ></div>
-                      </div>
-                      <span className="text-[9px] text-gray-400 mt-1">{label}</span>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          </>
-        )}
 
-        {/* Tracker tab */}
-        {adminTab === 'tracker' && (
-          <div className="space-y-4">
-            {/* Controls */}
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
-                <button
-                  onClick={() => {
-                    if (trackerMonth === 0) { setTrackerYear(y => y - 1); setTrackerMonth(11); }
-                    else setTrackerMonth(m => m - 1);
-                  }}
-                  className="p-0.5 text-gray-500 hover:text-orange-600 transition"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <span className="font-bold text-black min-w-35 text-center text-sm">
-                  {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
-                </span>
-                <button
-                  onClick={() => {
-                    if (trackerMonth === 11) { setTrackerYear(y => y + 1); setTrackerMonth(0); }
-                    else setTrackerMonth(m => m + 1);
-                  }}
-                  disabled={trackerYear === new Date().getFullYear() && trackerMonth === new Date().getMonth()}
-                  className="p-0.5 text-gray-500 hover:text-orange-600 transition disabled:opacity-30"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-              <select
-                value={trackerBacenta}
-                onChange={e => setTrackerBacenta(e.target.value)}
-                className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-black outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="all">All Bacentas</option>
-                {allBacentas.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
-              <span className="text-xs text-gray-400">{sundays.length} Sundays · {trackerMembers.length} members</span>
+                    {isExpanded && (
+                      <div className="bg-gray-50 px-4 sm:px-6 py-3 border-t border-gray-100">
+                        <div className="flex flex-wrap gap-2">
+                          {sheepForShepherd.map(sheep => {
+                            const faith = getFaithfulness(sheep);
+                            const ringColor = faith === 'faithful' ? 'ring-green-400' :
+                                             faith === 'at-risk' ? 'ring-amber-400' :
+                                             faith === 'lost' ? 'ring-red-400' : 'ring-gray-300';
+                            return (
+                              <div key={sheep.id} className="flex flex-col items-center p-2 bg-white rounded-lg border border-gray-100 min-w-14">
+                                <div className={`w-8 h-8 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center ring-2 ${ringColor} overflow-hidden`}>
+                                  {sheep.photo_url ? (
+                                    <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <span className="text-white text-[9px] font-bold">
+                                      {sheep.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[9px] text-gray-700 mt-1 text-center truncate w-full">{sheep.full_name.split(' ')[0]}</p>
+                                {sheep.recentWeeks && (
+                                  <div className="flex gap-0.5 mt-0.5">
+                                    {sheep.recentWeeks.slice(-4).map((present, i) => (
+                                      <div key={i} className={`w-1.5 h-1.5 rounded-full ${present ? 'bg-green-500' : 'bg-red-400'}`}></div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-
-            {/* Legend */}
-            <div className="flex items-center gap-4 text-xs text-gray-500">
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-green-500 inline-block"></span>Present</span>
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-red-400 inline-block"></span>Absent</span>
-              <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-gray-200 inline-block"></span>Not recorded</span>
-            </div>
-
-            {isDemo ? (
-              <div className="bg-orange-50 border border-orange-200 text-orange-700 rounded-xl p-4 text-sm">
-                Attendance tracker requires a live database connection. Demo mode shows sample data only.
-              </div>
-            ) : loadingTracker ? (
-              <div className="flex justify-center py-16">
-                <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-auto" style={{ maxHeight: '68vh' }}>
-                  <table className="border-collapse text-xs" style={{ minWidth: `${200 + sundays.length * 34}px` }}>
-                    <thead className="sticky top-0 z-20">
-                      <tr>
-                        <th
-                          className="sticky left-0 z-30 bg-gray-50 px-3 py-2 text-left font-semibold text-gray-700 border-b border-r border-gray-200"
-                          style={{ minWidth: 200 }}
-                        >
-                          <div className="flex items-center gap-1">
-                            <Users size={13} className="text-orange-500" />
-                            Member
-                          </div>
-                        </th>
-                        {sundaysByMonth.map(({ label, dates }) => (
-                          <th
-                            key={label}
-                            colSpan={dates.length}
-                            className="px-2 py-2 text-center font-semibold text-orange-700 bg-orange-50 border-b border-l border-gray-200 whitespace-nowrap"
-                          >
-                            {label}
-                          </th>
-                        ))}
-                        <th className="px-2 py-2 text-center font-semibold text-gray-600 bg-gray-50 border-b border-l border-gray-200">%</th>
-                      </tr>
-                      <tr>
-                        <th className="sticky left-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-1" style={{ minWidth: 200 }}></th>
-                        {sundays.map(s => (
-                          <th
-                            key={toDateStr(s)}
-                            className="px-0.5 py-1 text-center border-b border-l border-gray-100 bg-white font-normal text-gray-400"
-                            style={{ minWidth: 30 }}
-                          >
-                            <div className="text-[10px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: 40 }}>
-                              {s.toLocaleDateString('en', { month: 'numeric', day: 'numeric' })}
-                            </div>
-                          </th>
-                        ))}
-                        <th className="px-1 py-1 border-b border-l border-gray-100 bg-white"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trackerBacentaList.map(bacenta => {
-                        const bMembers = trackerMembers.filter(m => m.bacenta === bacenta);
-                        if (bMembers.length === 0) return null;
-                        return (
-                          <React.Fragment key={bacenta}>
-                            <tr>
-                              <td
-                                colSpan={sundays.length + 2}
-                                className="sticky left-0 px-3 py-1.5 text-[11px] font-bold text-orange-700 uppercase tracking-wide bg-orange-50 border-b border-gray-200"
-                              >
-                                {bacenta} <span className="text-orange-400 font-normal">({bMembers.length})</span>
-                              </td>
-                            </tr>
-                            {bMembers.map((member, idx) => {
-                              const mAtt = trackerAtt[member.id] || {};
-                              const recorded = sundays.filter(s => mAtt[toDateStr(s)] !== undefined).length;
-                              const present = sundays.filter(s => mAtt[toDateStr(s)] === true).length;
-                              const pct = recorded > 0 ? Math.round((present / recorded) * 100) : null;
-                              return (
-                                <tr key={member.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
-                                  <td
-                                    className="sticky left-0 z-10 bg-inherit px-3 py-1 border-r border-gray-200 font-medium text-black whitespace-nowrap"
-                                    style={{ minWidth: 200 }}
-                                  >
-                                    {member.full_name}
-                                  </td>
-                                  {sundays.map(s => {
-                                    const ds = toDateStr(s);
-                                    const val = mAtt[ds];
-                                    return (
-                                      <td key={ds} className="px-0.5 py-1 text-center border-l border-gray-100">
-                                        <div className={`w-5 h-5 rounded mx-auto ${
-                                          val === true ? 'bg-green-500' :
-                                          val === false ? 'bg-red-400' : 'bg-gray-200'
-                                        }`} />
-                                      </td>
-                                    );
-                                  })}
-                                  <td className="px-2 py-1 text-center border-l border-gray-100">
-                                    {pct !== null ? (
-                                      <span className={`text-[11px] font-medium ${pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-amber-500' : 'text-red-500'}`}>
-                                        {pct}%
-                                      </span>
-                                    ) : (
-                                      <span className="text-gray-300 text-[11px]">—</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </React.Fragment>
-                        );
-                      })}
-                      {trackerMembers.length === 0 && (
-                        <tr>
-                          <td colSpan={sundays.length + 2} className="text-center py-12 text-gray-400">No members to display</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   }

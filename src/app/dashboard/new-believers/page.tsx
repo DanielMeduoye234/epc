@@ -93,7 +93,7 @@ export default function NewBelieversPage() {
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
+          className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
         >
           <Plus size={20} />
           Add New Believer
@@ -138,7 +138,7 @@ export default function NewBelieversPage() {
                   <tr key={believer.id} className="hover:bg-orange-50/50 transition">
                     <td className="px-6 py-4">
                       <Link href={`/dashboard/profile/new-believer/${believer.id}`} className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                           {believer.photo_url ? (
                             <img src={believer.photo_url} alt={believer.full_name} className="w-full h-full object-cover" />
                           ) : (
@@ -169,7 +169,7 @@ export default function NewBelieversPage() {
                         </a>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-gray-600 text-sm max-w-[180px] truncate" title={believer.address}>{believer.address}</td>
+                    <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={believer.address}>{believer.address}</td>
                     <td className="px-6 py-4 text-gray-600">{believer.bacenta}</td>
                     <td className="px-6 py-4 text-gray-600">{believer.who_brought}</td>
                     <td className="px-6 py-4">
@@ -421,7 +421,7 @@ function NewBelieverForm({
               Cancel
             </button>
             <button type="submit" disabled={loading}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50">
+              className="flex-1 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50">
               {loading ? 'Saving...' : isEditing ? 'Save Changes' : 'Save'}
             </button>
           </div>

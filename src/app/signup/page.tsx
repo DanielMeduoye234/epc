@@ -107,7 +107,7 @@ export default function SignupPage() {
           </p>
           <Link
             href="/login"
-            className="inline-block px-6 py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
+            className="inline-block px-6 py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
           >
             Go to Login
           </Link>
@@ -195,7 +195,7 @@ export default function SignupPage() {
                       onChange={(e) => setRole(e.target.value as SignupRole)}
                       className="sr-only"
                     />
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
                       role === r.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-500'
                     }`}>
                       {r.icon}
@@ -241,7 +241,7 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 px-4 bg-linear-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>
