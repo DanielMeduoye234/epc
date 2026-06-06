@@ -23,6 +23,7 @@ export default function MembersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editMember, setEditMember] = useState<MemberWithShepherd | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [assigningBacentaId, setAssigningBacentaId] = useState<string | null>(null);
   const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [addForm, setAddForm] = useState({
     full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '',
@@ -123,6 +124,30 @@ export default function MembersPage() {
     setDeleteId(null);
   }
 
+  async function handleInlineBacentaAssign(member: MemberWithShepherd, bacenta: string) {
+    const nextBacenta = bacenta || 'Unassigned';
+    if (member.bacenta === nextBacenta) {
+      setAssigningBacentaId(null);
+      return;
+    }
+
+    if (isDemo) {
+      setMembers((prev) => prev.map((m) => (m.id === member.id ? { ...m, bacenta: nextBacenta } : m)));
+      setAssigningBacentaId(null);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('members')
+      .update({ bacenta: nextBacenta })
+      .eq('id', member.id);
+
+    if (!error) {
+      setMembers((prev) => prev.map((m) => (m.id === member.id ? { ...m, bacenta: nextBacenta } : m)));
+      setAssigningBacentaId(null);
+    }
+  }
+
   const filtered = members.filter((m) => {
     const matchesSearch =
       m.full_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -187,7 +212,7 @@ export default function MembersPage() {
           </div>
           {(profile?.role === 'shepherd' || profile?.role === 'super_admin' || profile?.role === 'bishop') && (
             <button onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition">
+              className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white text-sm font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition">
               <Plus size={16} /> {profile?.role === 'shepherd' ? 'Add Sheep' : 'Add Member'}
             </button>
           )}
@@ -200,13 +225,20 @@ export default function MembersPage() {
           <input type="text" placeholder="Search by name or bacenta..." value={search} onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black">
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-          <option value="flagged">Flagged</option>
-        </select>
+        <div className="sm:w-56">
+          <BacentaSelect
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: 'all', label: 'All Status' },
+              { value: 'active', label: 'Active' },
+              { value: 'inactive', label: 'Inactive' },
+              { value: 'flagged', label: 'Flagged' },
+            ]}
+            className="px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full"
+            placeholder="All Status"
+          />
+        </div>
       </div>
 
       {loading ? (
@@ -221,7 +253,7 @@ export default function MembersPage() {
               <div key={member.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                 <div className="flex items-center gap-3">
                   <Link href={`/dashboard/profile/member/${member.id}`} className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <div className="w-11 h-11 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                       {member.photo_url ? (
                         <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
                       ) : (
@@ -243,7 +275,7 @@ export default function MembersPage() {
                       {member.status}
                     </span>
                   </Link>
-                  <div className="flex items-center gap-1 flex-shrink-0 ml-1">
+                  <div className="flex items-center gap-1 shrink-0 ml-1">
                     <button onClick={() => setEditMember(member)}
                       className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition" title="Edit">
                       <Pencil size={14} />
@@ -285,7 +317,7 @@ export default function MembersPage() {
                     <tr key={member.id} className="hover:bg-orange-50/50 transition">
                       <td className="px-6 py-4">
                         <Link href={`/dashboard/profile/member/${member.id}`} className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                             {member.photo_url ? (
                               <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
                             ) : (
@@ -302,12 +334,45 @@ export default function MembersPage() {
                           {member.phone_number}
                         </a>
                       </td>
-                      <td className="px-6 py-4 text-gray-600">{member.bacenta}</td>
+                      <td className="px-6 py-4 text-gray-600">
+                        {assigningBacentaId === member.id ? (
+                          <div className="w-56">
+                            <BacentaSelect
+                              value={member.bacenta === 'Unassigned' ? '' : member.bacenta}
+                              onChange={(value) => handleInlineBacentaAssign(member, value)}
+                              bacentas={addMemberBacentas}
+                              includeLeader
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-sm text-black bg-white"
+                              placeholder="Assign bacenta..."
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setAssigningBacentaId(member.id)}
+                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition ${
+                              member.bacenta === 'Unassigned'
+                                ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
+                            }`}
+                          >
+                            {member.bacenta || 'Unassigned'}
+                          </button>
+                        )}
+                      </td>
                       {(profile?.role === 'super_admin' || profile?.role === 'bishop') && (
                         <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full">
+                          <button
+                            onClick={() => {
+                              if (!member.shepherd_name) setAssigningBacentaId(member.id);
+                            }}
+                            className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition ${
+                              member.shepherd_name
+                                ? 'text-blue-700 bg-blue-50'
+                                : 'text-blue-700 bg-blue-50 hover:bg-blue-100'
+                            }`}
+                          >
                             🐑 {member.shepherd_name || 'Unassigned'}
-                          </span>
+                          </button>
                         </td>
                       )}
                       <td className="px-6 py-4 text-gray-600">{new Date(member.membership_date).toLocaleDateString()}</td>
@@ -380,7 +445,7 @@ export default function MembersPage() {
                 placeholder="Select a bacenta..."
               />
               <button type="submit" disabled={adding}
-                className="w-full py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50">
+                className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50">
                 {adding ? 'Adding...' : profile?.role === 'shepherd' ? 'Add to My Sheep' : 'Add Member'}
               </button>
             </form>
@@ -478,13 +543,14 @@ function EditMemberModal({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Bacenta</label>
-            <select value={form.bacenta} onChange={e => setForm({ ...form, bacenta: e.target.value })} className={`${inputCls} bg-white`}>
-              <option value="">Select a bacenta...</option>
-              {bacentas.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-              {form.bacenta && !bacentas.find(b => b.name === form.bacenta) && (
-                <option value={form.bacenta}>{form.bacenta}</option>
-              )}
-            </select>
+            <BacentaSelect
+              value={form.bacenta}
+              onChange={(value) => setForm({ ...form, bacenta: value })}
+              bacentas={bacentas}
+              includeLeader
+              className={`${inputCls} bg-white`}
+              placeholder="Select a bacenta..."
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Who Brought Them</label>
@@ -492,16 +558,22 @@ function EditMemberModal({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as MemberStatus })} className={`${inputCls} bg-white`}>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="flagged">Flagged</option>
-            </select>
+            <BacentaSelect
+              value={form.status}
+              onChange={(value) => setForm({ ...form, status: value as MemberStatus })}
+              options={[
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+                { value: 'flagged', label: 'Flagged' },
+              ]}
+              className={`${inputCls} bg-white`}
+              placeholder="Select status..."
+            />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             <button type="submit" disabled={saving}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50">
+              className="flex-1 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50">
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
@@ -510,3 +582,4 @@ function EditMemberModal({
     </div>
   );
 }
+

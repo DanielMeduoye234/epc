@@ -111,7 +111,7 @@ export default function FirstTimersPage() {
         </div>
         {(profile?.role === 'super_admin' || profile?.role === 'bishop' || profile?.role === 'shepherd' || profile?.role === 'recorder') && (
           <button onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition">
+            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition">
             <Plus size={20} /> Add First Timer
           </button>
         )}
@@ -150,7 +150,7 @@ export default function FirstTimersPage() {
                     <tr key={ft.id} className="hover:bg-orange-50/50 transition">
                       <td className="px-6 py-4">
                         <Link href={`/dashboard/profile/first-timer/${ft.id}`} className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                             {ft.photo_url ? (
                               <img src={ft.photo_url} alt={ft.full_name} className="w-full h-full object-cover" />
                             ) : (
@@ -179,13 +179,13 @@ export default function FirstTimersPage() {
                           </a>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-gray-600 text-sm max-w-[180px] truncate" title={ft.address}>{ft.address}</td>
+                      <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={ft.address}>{ft.address}</td>
                       <td className="px-6 py-4 text-gray-600">{ft.bacenta}</td>
                       <td className="px-6 py-4 text-gray-600">{new Date(ft.date_joined).toLocaleDateString()}</td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-orange-400 to-orange-600 rounded-full transition-all"
+                            <div className="h-full bg-linear-to-r from-orange-400 to-orange-600 rounded-full transition-all"
                               style={{ width: `${Math.min(maxInMonth / 2 * 100, 100)}%` }} />
                           </div>
                           <span className={`text-xs font-medium ${isReady ? 'text-green-600' : 'text-gray-500'}`}>
@@ -338,10 +338,15 @@ function FirstTimerForm({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assign to Bacenta</label>
-            <select required value={form.bacenta} onChange={e => setForm({ ...form, bacenta: e.target.value })} className={`${inputCls} bg-white`}>
-              <option value="">Select a bacenta...</option>
-              {bacentas.map(b => <option key={b.id} value={b.name}>{b.name}{b.leader_name ? ` — ${b.leader_name}` : ''}</option>)}
-            </select>
+            <BacentaSelect
+              required
+              value={form.bacenta}
+              onChange={(value) => setForm({ ...form, bacenta: value })}
+              bacentas={bacentas}
+              includeLeader
+              className={`${inputCls} bg-white`}
+              placeholder="Select a bacenta..."
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number (WhatsApp)</label>
@@ -358,7 +363,7 @@ function FirstTimerForm({
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             <button type="submit" disabled={loading}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50">
+              className="flex-1 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50">
               {loading ? 'Saving...' : isEditing ? 'Save Changes' : 'Save'}
             </button>
           </div>
@@ -367,3 +372,4 @@ function FirstTimerForm({
     </div>
   );
 }
+

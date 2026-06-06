@@ -1,10 +1,16 @@
 import { Bacenta } from '@/lib/types';
 
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
 interface BacentaSelectProps {
   label?: string;
   value: string;
   onChange: (value: string) => void;
-  bacentas: Bacenta[];
+  bacentas?: Bacenta[];
+  options?: SelectOption[];
   required?: boolean;
   includeLeader?: boolean;
   className?: string;
@@ -15,13 +21,19 @@ export default function BacentaSelect({
   label,
   value,
   onChange,
-  bacentas,
+  bacentas = [],
+  options,
   required = false,
   includeLeader = false,
   className,
   placeholder = 'Select a bacenta...',
 }: BacentaSelectProps) {
   const selectClass = className || 'w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black bg-white';
+  const normalizedOptions: SelectOption[] = options || bacentas.map((b) => ({
+    value: b.name,
+    label: `${b.name}${includeLeader && b.leader_name ? ` - ${b.leader_name}` : ''}`,
+  }));
+  const hasCurrentValue = normalizedOptions.some((opt) => opt.value === value);
 
   return (
     <div>
@@ -33,13 +45,12 @@ export default function BacentaSelect({
         className={selectClass}
       >
         <option value="">{placeholder}</option>
-        {bacentas.map((b) => (
-          <option key={b.id} value={b.name}>
-            {b.name}
-            {includeLeader && b.leader_name ? ` - ${b.leader_name}` : ''}
+        {normalizedOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
           </option>
         ))}
-        {value && !bacentas.find((b) => b.name === value) && (
+        {value && !hasCurrentValue && (
           <option value={value}>{value}</option>
         )}
       </select>
