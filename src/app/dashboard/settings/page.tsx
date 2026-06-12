@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Profile, UserRole } from '@/lib/types';
+import { Bacenta, Profile, UserRole } from '@/lib/types';
 import { UserPlus, X, Shield, MessageCircle, Save, Check } from 'lucide-react';
+import BacentaSelect from '@/components/BacentaSelect';
 
 export default function SettingsPage() {
   const { profile, isDemo } = useAuth();
   const supabase = createClient();
   const [users, setUsers] = useState<Profile[]>([]);
+  const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [whatsappPhone, setWhatsappPhone] = useState('');
@@ -19,6 +21,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (profile) {
       fetchUsers();
+      fetchBacentas();
       loadWhatsAppConfig();
     }
   }, [profile]);
@@ -54,15 +57,28 @@ export default function SettingsPage() {
   async function fetchUsers() {
     const { data } = await supabase
       .from('profiles')
-      .select('*')
+      .select('*, bacenta:bacentas(*), shepherd_bacentas(bacenta:bacentas(*))')
       .eq('branch_id', profile!.branch_id)
       .order('created_at', { ascending: false });
-    setUsers(data || []);
+    const mapped = (data || []).map((user: Profile & { shepherd_bacentas?: { bacenta: Bacenta | null }[] }) => ({
+      ...user,
+      bacentas: (user.shepherd_bacentas || []).map((row) => row.bacenta).filter(Boolean) as Bacenta[],
+    }));
+    setUsers(mapped);
     setLoading(false);
   }
 
+  async function fetchBacentas() {
+    const { data } = await supabase
+      .from('bacentas')
+      .select('*')
+      .eq('branch_id', profile!.branch_id)
+      .order('name');
+    setBacentas(data || []);
+  }
+
   async function updateRole(userId: string, role: UserRole) {
-    await supabase.from('profiles').update({ role }).eq('id', userId);
+    await supabase.from('profiles').update({ role, bacenta_id: role === 'shepherd' ? users.find((u) => u.id === userId)?.bacenta_id || null : null }).eq('id', userId);
     fetchUsers();
   }
 
@@ -92,7 +108,7 @@ export default function SettingsPage() {
         </div>
         <button
           onClick={() => setShowInvite(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
+          className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
         >
           <UserPlus size={20} />
           Invite User
@@ -160,7 +176,7 @@ export default function SettingsPage() {
             {users.map((user) => (
               <div key={user.id} className="flex items-center justify-between px-6 py-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-black flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-gray-700 to-black flex items-center justify-center">
                     <span className="text-white text-sm font-bold">
                       {user.full_name
                         .split(' ')
@@ -173,6 +189,11 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium text-black">{user.full_name}</p>
                     <p className="text-sm text-gray-500">{user.email}</p>
+                    {user.role === 'shepherd' && (
+                      <p className="text-xs text-orange-600 mt-0.5">
+                        Bacentas: {user.bacentas?.map((b) => b.name).join(', ') || user.bacenta?.name || 'Unassigned'}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -203,6 +224,7 @@ export default function SettingsPage() {
       {showInvite && (
         <InviteUserForm
           branchId={profile.branch_id}
+          bacentas={bacentas}
           onClose={() => setShowInvite(false)}
           onInvited={() => {
             setShowInvite(false);
@@ -216,10 +238,12 @@ export default function SettingsPage() {
 
 function InviteUserForm({
   branchId,
+  bacentas,
   onClose,
   onInvited,
 }: {
   branchId: string;
+  bacentas: Bacenta[];
   onClose: () => void;
   onInvited: () => void;
 }) {
@@ -230,6 +254,7 @@ function InviteUserForm({
     password: '',
     full_name: '',
     role: 'shepherd' as UserRole,
+    bacenta_id: '',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -246,6 +271,7 @@ function InviteUserForm({
         full_name: form.full_name,
         role: form.role,
         branch_id: branchId,
+        bacenta_id: form.role === 'shepherd' ? form.bacenta_id : undefined,
       }),
     });
 
@@ -319,7 +345,7 @@ function InviteUserForm({
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
             <select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })}
+              onChange={(e) => setForm({ ...form, role: e.target.value as UserRole, bacenta_id: e.target.value === 'shepherd' ? form.bacenta_id : '' })}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
             >
               <option value="bishop">Bishop</option>
@@ -328,6 +354,23 @@ function InviteUserForm({
               <option value="recorder">New Believer Recorder</option>
             </select>
           </div>
+
+          {form.role === 'shepherd' && (
+            <div>
+              <BacentaSelect
+                label="Initial Bacenta Assignment"
+                value={form.bacenta_id}
+                onChange={(value) => setForm({ ...form, bacenta_id: value })}
+                options={bacentas.map((b) => ({ value: b.id, label: b.name }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black bg-white disabled:bg-gray-100 disabled:text-gray-400"
+                placeholder={bacentas.length === 0 ? 'Create a bacenta first' : 'Optional: select bacenta...'}
+                disabled={bacentas.length === 0}
+              />
+              {bacentas.length === 0 && (
+                <p className="text-xs text-orange-600 mt-1">Create a bacenta before adding shepherd accounts.</p>
+              )}
+            </div>
+          )}
 
           <div className="flex gap-3 pt-4">
             <button
@@ -340,7 +383,7 @@ function InviteUserForm({
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50"
+              className="flex-1 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 font-medium disabled:opacity-50"
             >
               {loading ? 'Creating...' : 'Create User'}
             </button>

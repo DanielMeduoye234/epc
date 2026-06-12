@@ -29,14 +29,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function getProfile() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        let { data } = await supabase
+        let { data, error } = await supabase
           .from('profiles')
-          .select('*, branch:branches(*)')
+          .select('*, branch:branches(*), bacenta:bacentas(*)')
           .eq('id', user.id)
           .maybeSingle();
 
+        if (error) {
+          const fallback = await supabase
+            .from('profiles')
+            .select('*, branch:branches(*)')
+            .eq('id', user.id)
+            .maybeSingle();
+          data = fallback.data;
+          error = fallback.error;
+        }
+
         // Auto-repair: if the auth user exists but has no profile row, create it now
-        if (!data) {
+        if (!data && !error) {
           const meta = user.user_metadata ?? {};
           const res = await fetch('/api/auth/create-profile', {
             method: 'POST',
@@ -49,13 +59,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }),
           });
           if (res.ok) {
-            const refetch = await supabase
+            let refetch = await supabase
               .from('profiles')
-              .select('*, branch:branches(*)')
+              .select('*, branch:branches(*), bacenta:bacentas(*)')
               .eq('id', user.id)
               .maybeSingle();
+
+            if (refetch.error) {
+              refetch = await supabase
+                .from('profiles')
+                .select('*, branch:branches(*)')
+                .eq('id', user.id)
+                .maybeSingle();
+            }
             data = refetch.data;
           }
+        }
+
+        if (data) {
+          const { data: assignedBacentas, error: assignedBacentasError } = await supabase
+            .from('shepherd_bacentas')
+            .select('bacenta:bacentas(*)')
+            .eq('shepherd_id', data.id)
+            .eq('branch_id', data.branch_id);
+
+          data = {
+            ...data,
+            bacentas: assignedBacentasError
+              ? data.bacenta ? [data.bacenta] : []
+              : (assignedBacentas || [])
+                .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
+                .filter(Boolean),
+          };
         }
 
         setProfile(data);

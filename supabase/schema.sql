@@ -20,7 +20,11 @@ CREATE TABLE IF NOT EXISTS branches (
 -- ============================================================
 -- PROFILES TABLE (extends auth.users)
 -- ============================================================
-CREATE TYPE user_role AS ENUM ('super_admin', 'bishop', 'shepherd', 'recorder');
+DO $$ BEGIN
+  CREATE TYPE user_role AS ENUM ('super_admin', 'bishop', 'shepherd', 'recorder');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -44,6 +48,18 @@ CREATE TABLE IF NOT EXISTS bacentas (
   UNIQUE(name, branch_id)
 );
 
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS bacenta_id UUID REFERENCES bacentas(id) ON DELETE SET NULL;
+
+-- Many-to-many assignment: one shepherd can cover multiple bacentas
+CREATE TABLE IF NOT EXISTS shepherd_bacentas (
+  shepherd_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  bacenta_id UUID NOT NULL REFERENCES bacentas(id) ON DELETE CASCADE,
+  branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  PRIMARY KEY (shepherd_id, bacenta_id)
+);
+
 -- ============================================================
 -- NEW BELIEVERS TABLE
 -- ============================================================
@@ -64,7 +80,11 @@ CREATE TABLE IF NOT EXISTS new_believers (
 -- ============================================================
 -- FIRST TIMERS TABLE
 -- ============================================================
-CREATE TYPE person_status AS ENUM ('first_timer', 'member');
+DO $$ BEGIN
+  CREATE TYPE person_status AS ENUM ('first_timer', 'member');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS first_timers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -86,7 +106,11 @@ CREATE TABLE IF NOT EXISTS first_timers (
 -- ============================================================
 -- MEMBERS TABLE
 -- ============================================================
-CREATE TYPE member_status AS ENUM ('active', 'inactive', 'flagged');
+DO $$ BEGIN
+  CREATE TYPE member_status AS ENUM ('active', 'inactive', 'flagged');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -109,7 +133,11 @@ CREATE TABLE IF NOT EXISTS members (
 -- ============================================================
 -- ATTENDANCE TABLE
 -- ============================================================
-CREATE TYPE person_type AS ENUM ('new_believer', 'first_timer', 'member');
+DO $$ BEGIN
+  CREATE TYPE person_type AS ENUM ('new_believer', 'first_timer', 'member');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS attendance (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -126,8 +154,17 @@ CREATE TABLE IF NOT EXISTS attendance (
 -- ============================================================
 -- FOLLOW-UPS TABLE
 -- ============================================================
-CREATE TYPE follow_up_type AS ENUM ('call', 'visit', 'whatsapp', 'prayer');
-CREATE TYPE follow_up_status AS ENUM ('completed', 'no_answer', 'scheduled');
+DO $$ BEGIN
+  CREATE TYPE follow_up_type AS ENUM ('call', 'visit', 'whatsapp', 'prayer');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE follow_up_status AS ENUM ('completed', 'no_answer', 'scheduled');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS follow_ups (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -160,8 +197,17 @@ CREATE TABLE IF NOT EXISTS visitations (
 -- ============================================================
 -- ALERTS TABLE
 -- ============================================================
-CREATE TYPE alert_type AS ENUM ('absence', 'birthday', 'promotion_ready', 'follow_up_needed');
-CREATE TYPE alert_priority AS ENUM ('high', 'medium', 'low');
+DO $$ BEGIN
+  CREATE TYPE alert_type AS ENUM ('absence', 'birthday', 'promotion_ready', 'follow_up_needed');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE alert_priority AS ENUM ('high', 'medium', 'low');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS alerts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -180,9 +226,23 @@ CREATE TABLE IF NOT EXISTS alerts (
 -- ============================================================
 -- BROADCASTS TABLE (EPC News)
 -- ============================================================
-CREATE TYPE broadcast_audience AS ENUM ('all', 'new_believers', 'first_timers', 'members');
-CREATE TYPE broadcast_status AS ENUM ('draft', 'scheduled', 'sent', 'failed');
-CREATE TYPE message_type AS ENUM ('prayer', 'news', 'reminder', 'event');
+DO $$ BEGIN
+  CREATE TYPE broadcast_audience AS ENUM ('all', 'new_believers', 'first_timers', 'members');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE broadcast_status AS ENUM ('draft', 'scheduled', 'sent', 'failed');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE message_type AS ENUM ('prayer', 'news', 'reminder', 'event');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS broadcasts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -226,6 +286,7 @@ ALTER TABLE bacentas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE new_believers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE first_timers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shepherd_bacentas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE follow_ups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE visitations ENABLE ROW LEVEL SECURITY;
@@ -247,6 +308,8 @@ $$ LANGUAGE SQL SECURITY DEFINER;
 -- ============================================================
 -- POLICIES: BRANCHES
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view their own branch" ON branches;
+
 CREATE POLICY "Users can view their own branch"
   ON branches FOR SELECT
   USING (id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -254,6 +317,10 @@ CREATE POLICY "Users can view their own branch"
 -- ============================================================
 -- POLICIES: PROFILES
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view profiles in their branch" ON profiles;
+DROP POLICY IF EXISTS "Super admins and bishops can insert profiles" ON profiles;
+DROP POLICY IF EXISTS "Super admins can update profiles in their branch" ON profiles;
+
 CREATE POLICY "Users can view profiles in their branch"
   ON profiles FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -269,6 +336,9 @@ CREATE POLICY "Super admins can update profiles in their branch"
 -- ============================================================
 -- POLICIES: BACENTAS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view bacentas in their branch" ON bacentas;
+DROP POLICY IF EXISTS "Super admins can manage bacentas" ON bacentas;
+
 CREATE POLICY "Users can view bacentas in their branch"
   ON bacentas FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -278,8 +348,28 @@ CREATE POLICY "Super admins can manage bacentas"
   USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
 
 -- ============================================================
+-- POLICIES: SHEPHERD BACENTA ASSIGNMENTS
+-- ============================================================
+DROP POLICY IF EXISTS "Users can view shepherd bacenta assignments in their branch" ON shepherd_bacentas;
+DROP POLICY IF EXISTS "Super admins can manage shepherd bacenta assignments" ON shepherd_bacentas;
+
+CREATE POLICY "Users can view shepherd bacenta assignments in their branch"
+  ON shepherd_bacentas FOR SELECT
+  USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
+
+CREATE POLICY "Super admins can manage shepherd bacenta assignments"
+  ON shepherd_bacentas FOR ALL
+  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'))
+  WITH CHECK (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
+
+-- ============================================================
 -- POLICIES: NEW BELIEVERS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view new believers in their branch" ON new_believers;
+DROP POLICY IF EXISTS "Recorders and above can add new believers" ON new_believers;
+DROP POLICY IF EXISTS "Super admins can update new believers" ON new_believers;
+DROP POLICY IF EXISTS "Super admins can delete new believers" ON new_believers;
+
 CREATE POLICY "Users can view new believers in their branch"
   ON new_believers FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -299,6 +389,11 @@ CREATE POLICY "Super admins can delete new believers"
 -- ============================================================
 -- POLICIES: FIRST TIMERS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view first timers in their branch" ON first_timers;
+DROP POLICY IF EXISTS "Recorders and above can add first timers" ON first_timers;
+DROP POLICY IF EXISTS "Shepherds and above can update first timers" ON first_timers;
+DROP POLICY IF EXISTS "Super admins can delete first timers" ON first_timers;
+
 CREATE POLICY "Users can view first timers in their branch"
   ON first_timers FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -318,6 +413,11 @@ CREATE POLICY "Super admins can delete first timers"
 -- ============================================================
 -- POLICIES: MEMBERS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view members in their branch" ON members;
+DROP POLICY IF EXISTS "Shepherds and above can add members" ON members;
+DROP POLICY IF EXISTS "Shepherds and above can update members" ON members;
+DROP POLICY IF EXISTS "Super admins can delete members" ON members;
+
 CREATE POLICY "Users can view members in their branch"
   ON members FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -337,6 +437,11 @@ CREATE POLICY "Super admins can delete members"
 -- ============================================================
 -- POLICIES: ATTENDANCE
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view attendance in their branch" ON attendance;
+DROP POLICY IF EXISTS "Shepherds and above can add attendance" ON attendance;
+DROP POLICY IF EXISTS "Shepherds and above can update attendance" ON attendance;
+DROP POLICY IF EXISTS "Shepherds and above can delete attendance" ON attendance;
+
 CREATE POLICY "Users can view attendance in their branch"
   ON attendance FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -356,6 +461,10 @@ CREATE POLICY "Shepherds and above can delete attendance"
 -- ============================================================
 -- POLICIES: FOLLOW-UPS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view follow-ups in their branch" ON follow_ups;
+DROP POLICY IF EXISTS "Shepherds and above can add follow-ups" ON follow_ups;
+DROP POLICY IF EXISTS "Shepherds and above can update follow-ups" ON follow_ups;
+
 CREATE POLICY "Users can view follow-ups in their branch"
   ON follow_ups FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -371,6 +480,10 @@ CREATE POLICY "Shepherds and above can update follow-ups"
 -- ============================================================
 -- POLICIES: VISITATIONS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view visitations in their branch" ON visitations;
+DROP POLICY IF EXISTS "Shepherds and above can add visitations" ON visitations;
+DROP POLICY IF EXISTS "Shepherds and above can update visitations" ON visitations;
+
 CREATE POLICY "Users can view visitations in their branch"
   ON visitations FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -386,6 +499,10 @@ CREATE POLICY "Shepherds and above can update visitations"
 -- ============================================================
 -- POLICIES: ALERTS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view alerts in their branch" ON alerts;
+DROP POLICY IF EXISTS "System can insert alerts" ON alerts;
+DROP POLICY IF EXISTS "Users can update their alerts (mark read)" ON alerts;
+
 CREATE POLICY "Users can view alerts in their branch"
   ON alerts FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -401,6 +518,11 @@ CREATE POLICY "Users can update their alerts (mark read)"
 -- ============================================================
 -- POLICIES: BROADCASTS
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view broadcasts in their branch" ON broadcasts;
+DROP POLICY IF EXISTS "Super admins can insert broadcasts" ON broadcasts;
+DROP POLICY IF EXISTS "Super admins can update broadcasts" ON broadcasts;
+DROP POLICY IF EXISTS "Super admins can delete broadcasts" ON broadcasts;
+
 CREATE POLICY "Users can view broadcasts in their branch"
   ON broadcasts FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -420,6 +542,11 @@ CREATE POLICY "Super admins can delete broadcasts"
 -- ============================================================
 -- POLICIES: PRAYER SCHEDULES
 -- ============================================================
+DROP POLICY IF EXISTS "Users can view prayer schedules in their branch" ON prayer_schedules;
+DROP POLICY IF EXISTS "Super admins can insert prayer schedules" ON prayer_schedules;
+DROP POLICY IF EXISTS "Super admins can update prayer schedules" ON prayer_schedules;
+DROP POLICY IF EXISTS "Super admins can delete prayer schedules" ON prayer_schedules;
+
 CREATE POLICY "Users can view prayer schedules in their branch"
   ON prayer_schedules FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -439,29 +566,32 @@ CREATE POLICY "Super admins can delete prayer schedules"
 -- ============================================================
 -- INDEXES
 -- ============================================================
-CREATE INDEX idx_new_believers_branch ON new_believers(branch_id);
-CREATE INDEX idx_new_believers_date ON new_believers(date_saved);
-CREATE INDEX idx_first_timers_branch ON first_timers(branch_id);
-CREATE INDEX idx_first_timers_status ON first_timers(status);
-CREATE INDEX idx_members_branch ON members(branch_id);
-CREATE INDEX idx_members_status ON members(status);
-CREATE INDEX idx_members_shepherd ON members(assigned_shepherd);
-CREATE INDEX idx_members_birthday ON members(birthday);
-CREATE INDEX idx_attendance_person ON attendance(person_id, date);
-CREATE INDEX idx_attendance_branch ON attendance(branch_id);
-CREATE INDEX idx_follow_ups_branch ON follow_ups(branch_id);
-CREATE INDEX idx_follow_ups_shepherd ON follow_ups(shepherd_id);
-CREATE INDEX idx_follow_ups_member ON follow_ups(member_id);
-CREATE INDEX idx_visitations_branch ON visitations(branch_id);
-CREATE INDEX idx_visitations_shepherd ON visitations(shepherd_id);
-CREATE INDEX idx_visitations_date ON visitations(scheduled_date);
-CREATE INDEX idx_alerts_branch ON alerts(branch_id);
-CREATE INDEX idx_alerts_read ON alerts(is_read) WHERE is_read = FALSE;
-CREATE INDEX idx_broadcasts_branch ON broadcasts(branch_id);
-CREATE INDEX idx_broadcasts_status ON broadcasts(status);
-CREATE INDEX idx_broadcasts_scheduled ON broadcasts(scheduled_at) WHERE status = 'scheduled';
-CREATE INDEX idx_prayer_schedules_branch ON prayer_schedules(branch_id);
-CREATE INDEX idx_prayer_schedules_active ON prayer_schedules(day_of_week, time) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_new_believers_branch ON new_believers(branch_id);
+CREATE INDEX IF NOT EXISTS idx_new_believers_date ON new_believers(date_saved);
+CREATE INDEX IF NOT EXISTS idx_first_timers_branch ON first_timers(branch_id);
+CREATE INDEX IF NOT EXISTS idx_first_timers_status ON first_timers(status);
+CREATE INDEX IF NOT EXISTS idx_members_branch ON members(branch_id);
+CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);
+CREATE INDEX IF NOT EXISTS idx_members_shepherd ON members(assigned_shepherd);
+CREATE INDEX IF NOT EXISTS idx_members_birthday ON members(birthday);
+CREATE INDEX IF NOT EXISTS idx_profiles_bacenta ON profiles(bacenta_id);
+CREATE INDEX IF NOT EXISTS idx_shepherd_bacentas_branch ON shepherd_bacentas(branch_id);
+CREATE INDEX IF NOT EXISTS idx_shepherd_bacentas_bacenta ON shepherd_bacentas(bacenta_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_person ON attendance(person_id, date);
+CREATE INDEX IF NOT EXISTS idx_attendance_branch ON attendance(branch_id);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_branch ON follow_ups(branch_id);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_shepherd ON follow_ups(shepherd_id);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_member ON follow_ups(member_id);
+CREATE INDEX IF NOT EXISTS idx_visitations_branch ON visitations(branch_id);
+CREATE INDEX IF NOT EXISTS idx_visitations_shepherd ON visitations(shepherd_id);
+CREATE INDEX IF NOT EXISTS idx_visitations_date ON visitations(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_alerts_branch ON alerts(branch_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_read ON alerts(is_read) WHERE is_read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_broadcasts_branch ON broadcasts(branch_id);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_status ON broadcasts(status);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_scheduled ON broadcasts(scheduled_at) WHERE status = 'scheduled';
+CREATE INDEX IF NOT EXISTS idx_prayer_schedules_branch ON prayer_schedules(branch_id);
+CREATE INDEX IF NOT EXISTS idx_prayer_schedules_active ON prayer_schedules(day_of_week, time) WHERE is_active = TRUE;
 
 -- ============================================================
 -- FUNCTION: Auto-promote First Timers to Members
@@ -640,6 +770,9 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_person ON chat_messages(person_id, 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_branch ON chat_messages(branch_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_phone ON chat_messages(phone_number);
 
+DROP POLICY IF EXISTS "Users can view chat messages in their branch" ON chat_messages;
+DROP POLICY IF EXISTS "Users can insert chat messages in their branch" ON chat_messages;
+
 CREATE POLICY "Users can view chat messages in their branch"
   ON chat_messages FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
@@ -662,6 +795,10 @@ CREATE TABLE IF NOT EXISTS branch_settings (
 ALTER TABLE branch_settings ENABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS idx_branch_settings_branch ON branch_settings(branch_id);
+
+DROP POLICY IF EXISTS "Super admins can view branch settings" ON branch_settings;
+DROP POLICY IF EXISTS "Super admins can upsert branch settings" ON branch_settings;
+DROP POLICY IF EXISTS "Super admins can update branch settings" ON branch_settings;
 
 CREATE POLICY "Super admins can view branch settings"
   ON branch_settings FOR SELECT

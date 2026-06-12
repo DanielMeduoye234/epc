@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Plus, X, Trash2, Edit2, Users, FolderTree } from 'lucide-react';
+import { Plus, X, Trash2, Edit2, Users, FolderTree, ChevronDown, Search, Check } from 'lucide-react';
 
 interface Bacenta {
   id: string;
@@ -13,11 +13,17 @@ interface Bacenta {
   branch_id: string;
   created_at: string;
   member_count?: number;
+  shepherds?: { id: string; full_name: string }[];
+}
+
+interface ShepherdOption {
+  id: string;
+  full_name: string;
 }
 
 const DEMO_BACENTAS: Bacenta[] = [
-  { id: 'bac-1', name: 'Bacenta Alpha', leader_name: 'Brother Samuel', location: 'Zone A, Lagos', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z', member_count: 4 },
-  { id: 'bac-2', name: 'Bacenta Beta', leader_name: 'Sister Joy', location: 'Zone B, Ikeja', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z', member_count: 3 },
+  { id: 'bac-1', name: 'Bacenta Alpha', leader_name: 'Brother Samuel', location: 'Zone A, Lagos', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z', member_count: 4, shepherds: [{ id: 'demo-user-001', full_name: 'Shepherd Samuel' }] },
+  { id: 'bac-2', name: 'Bacenta Beta', leader_name: 'Sister Joy', location: 'Zone B, Ikeja', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z', member_count: 3, shepherds: [{ id: 'demo-user-002', full_name: 'Shepherd Grace' }] },
   { id: 'bac-3', name: 'Bacenta Omega', leader_name: 'Brother Daniel', location: 'Zone C, Lekki', branch_id: 'demo-branch-001', created_at: '2025-06-01T10:00:00Z', member_count: 3 },
 ];
 
@@ -28,18 +34,36 @@ export default function BacentasPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', leader_name: '', location: '' });
+  const [shepherds, setShepherds] = useState<ShepherdOption[]>([]);
+  const [form, setForm] = useState({ name: '', leader_name: '', location: '', shepherd_ids: [] as string[] });
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile) {
       if (isDemo) {
         setBacentas(DEMO_BACENTAS);
+        setShepherds([
+          { id: 'demo-user-001', full_name: 'Shepherd Samuel' },
+          { id: 'demo-user-002', full_name: 'Shepherd Grace' },
+        ]);
         setLoading(false);
       } else {
         fetchBacentas();
+        fetchShepherds();
       }
     }
   }, [profile, isDemo]);
+
+  async function fetchShepherds() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('branch_id', profile!.branch_id)
+      .eq('role', 'shepherd')
+      .order('full_name');
+    setShepherds(data || []);
+  }
 
   async function fetchBacentas() {
     const { data } = await supabase
@@ -57,7 +81,25 @@ export default function BacentasPage() {
             .select('id', { count: 'exact', head: true })
             .eq('branch_id', profile!.branch_id)
             .eq('bacenta', b.name);
-          return { ...b, member_count: count || 0 };
+          const { data: shepherds, error: shepherdLinksError } = await supabase
+            .from('shepherd_bacentas')
+            .select('shepherd:profiles(id, full_name)')
+            .eq('branch_id', profile!.branch_id)
+            .eq('bacenta_id', b.id);
+          let linkedShepherds = (shepherds || [])
+            .map((row: { shepherd: ShepherdOption | null }) => row.shepherd)
+            .filter(Boolean) as ShepherdOption[];
+
+          if (shepherdLinksError) {
+            const { data: legacyShepherds } = await supabase
+              .from('profiles')
+              .select('id, full_name')
+              .eq('branch_id', profile!.branch_id)
+              .eq('role', 'shepherd')
+              .eq('bacenta_id', b.id);
+            linkedShepherds = legacyShepherds || [];
+          }
+          return { ...b, member_count: count || 0, shepherds: linkedShepherds };
         })
       );
       setBacentas(withCounts);
@@ -68,10 +110,13 @@ export default function BacentasPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
+    setSaving(true);
+    setFormError(null);
 
     if (isDemo) {
+      const selectedShepherds = shepherds.filter((s) => form.shepherd_ids.includes(s.id));
       if (editingId) {
-        setBacentas(prev => prev.map(b => b.id === editingId ? { ...b, ...form } : b));
+        setBacentas(prev => prev.map(b => b.id === editingId ? { ...b, name: form.name, leader_name: form.leader_name || null, location: form.location || null, shepherds: selectedShepherds } : b));
       } else {
         const newBacenta: Bacenta = {
           id: `bac-${Date.now()}`,
@@ -81,23 +126,51 @@ export default function BacentasPage() {
           branch_id: 'demo-branch-001',
           created_at: new Date().toISOString(),
           member_count: 0,
+          shepherds: selectedShepherds,
         };
         setBacentas(prev => [...prev, newBacenta]);
       }
       resetForm();
+      setSaving(false);
       return;
     }
 
     if (editingId) {
       const current = bacentas.find((b) => b.id === editingId);
-      await supabase.from('bacentas').update({
+      const { error: updateError } = await supabase.from('bacentas').update({
         name: form.name,
         leader_name: form.leader_name || null,
         location: form.location || null,
       }).eq('id', editingId);
 
+      if (updateError) {
+        setFormError(updateError.message);
+        setSaving(false);
+        return;
+      }
+
+      const { error: deleteLinksError } = await supabase.from('shepherd_bacentas').delete().eq('bacenta_id', editingId).eq('branch_id', profile!.branch_id);
+      if (deleteLinksError) {
+        setFormError(deleteLinksError.message);
+        setSaving(false);
+        return;
+      }
+
+      if (form.shepherd_ids.length > 0) {
+        const { error: insertLinksError } = await supabase.from('shepherd_bacentas').insert(form.shepherd_ids.map((shepherdId) => ({
+          shepherd_id: shepherdId,
+          bacenta_id: editingId,
+          branch_id: profile!.branch_id,
+        })));
+        if (insertLinksError) {
+          setFormError(insertLinksError.message);
+          setSaving(false);
+          return;
+        }
+      }
+
       if (current && current.name !== form.name) {
-        await Promise.all([
+        const results = await Promise.all([
           supabase
             .from('members')
             .update({ bacenta: form.name })
@@ -114,17 +187,43 @@ export default function BacentasPage() {
             .eq('branch_id', profile!.branch_id)
             .eq('bacenta', current.name),
         ]);
+        const renameError = results.find((result) => result.error)?.error;
+        if (renameError) {
+          setFormError(renameError.message);
+          setSaving(false);
+          return;
+        }
       }
     } else {
-      await supabase.from('bacentas').insert({
+      const { data: newBacenta, error: insertError } = await supabase.from('bacentas').insert({
         name: form.name,
         leader_name: form.leader_name || null,
         location: form.location || null,
         branch_id: profile!.branch_id,
-      });
+      }).select('id').single();
+
+      if (insertError) {
+        setFormError(insertError.message);
+        setSaving(false);
+        return;
+      }
+
+      if (newBacenta && form.shepherd_ids.length > 0) {
+        const { error: insertLinksError } = await supabase.from('shepherd_bacentas').insert(form.shepherd_ids.map((shepherdId) => ({
+          shepherd_id: shepherdId,
+          bacenta_id: newBacenta.id,
+          branch_id: profile!.branch_id,
+        })));
+        if (insertLinksError) {
+          setFormError(insertLinksError.message);
+          setSaving(false);
+          return;
+        }
+      }
     }
     resetForm();
     fetchBacentas();
+    setSaving(false);
   }
 
   async function handleDelete(id: string) {
@@ -139,14 +238,30 @@ export default function BacentasPage() {
 
   function startEdit(bacenta: Bacenta) {
     setEditingId(bacenta.id);
-    setForm({ name: bacenta.name, leader_name: bacenta.leader_name || '', location: bacenta.location || '' });
+    setForm({
+      name: bacenta.name,
+      leader_name: bacenta.leader_name || '',
+      location: bacenta.location || '',
+      shepherd_ids: bacenta.shepherds?.map((s) => s.id) || [],
+    });
     setShowForm(true);
   }
 
   function resetForm() {
-    setForm({ name: '', leader_name: '', location: '' });
+    setForm({ name: '', leader_name: '', location: '', shepherd_ids: [] });
     setEditingId(null);
+    setFormError(null);
+    setSaving(false);
     setShowForm(false);
+  }
+
+  function toggleShepherd(shepherdId: string) {
+    setForm((prev) => ({
+      ...prev,
+      shepherd_ids: prev.shepherd_ids.includes(shepherdId)
+        ? prev.shepherd_ids.filter((id) => id !== shepherdId)
+        : [...prev.shepherd_ids, shepherdId],
+    }));
   }
 
   return (
@@ -185,6 +300,9 @@ export default function BacentasPage() {
                     {bacenta.leader_name && (
                       <p className="text-xs text-gray-500">Leader: {bacenta.leader_name}</p>
                     )}
+                    <p className="text-xs text-blue-600 mt-0.5">
+                      Shepherd: {bacenta.shepherds?.map((s) => s.full_name).join(', ') || 'Unassigned'}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -234,6 +352,11 @@ export default function BacentasPage() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              {formError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {formError}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Bacenta Name *</label>
                 <input
@@ -265,6 +388,21 @@ export default function BacentasPage() {
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Assigned Shepherds</label>
+                {shepherds.length === 0 ? (
+                  <div className="rounded-lg border border-orange-100 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+                    Create shepherd accounts before assigning them to this bacenta.
+                  </div>
+                ) : (
+                  <ShepherdMultiSelect
+                    shepherds={shepherds}
+                    selectedIds={form.shepherd_ids}
+                    onToggle={toggleShepherd}
+                  />
+                )}
+                <p className="text-xs text-gray-400 mt-1">A shepherd can be assigned to more than one bacenta.</p>
+              </div>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -275,12 +413,119 @@ export default function BacentasPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 transition font-medium"
+                  disabled={saving}
+                  className="flex-1 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white rounded-lg hover:from-orange-500 hover:to-orange-700 transition font-medium disabled:opacity-50"
                 >
-                  {editingId ? 'Update' : 'Create'}
+                  {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShepherdMultiSelect({
+  shepherds,
+  selectedIds,
+  onToggle,
+}: {
+  shepherds: ShepherdOption[];
+  selectedIds: string[];
+  onToggle: (shepherdId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedShepherds = useMemo(
+    () => shepherds.filter((shepherd) => selectedIds.includes(shepherd.id)),
+    [shepherds, selectedIds]
+  );
+  const filteredShepherds = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return shepherds;
+    return shepherds.filter((shepherd) => shepherd.full_name.toLowerCase().includes(normalizedQuery));
+  }, [query, shepherds]);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="w-full min-h-12 px-4 py-2.5 border border-gray-200 rounded-lg bg-white text-left flex items-center justify-between gap-3 focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
+      >
+        <span className={selectedShepherds.length > 0 ? 'text-black' : 'text-gray-500'}>
+          {selectedShepherds.length > 0
+            ? `${selectedShepherds.length} shepherd${selectedShepherds.length === 1 ? '' : 's'} selected`
+            : 'Select shepherds...'}
+        </span>
+        <ChevronDown size={18} className={`text-gray-400 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {selectedShepherds.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {selectedShepherds.map((shepherd) => (
+            <button
+              key={shepherd.id}
+              type="button"
+              onClick={() => onToggle(shepherd.id)}
+              className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"
+            >
+              {shepherd.full_name}
+              <X size={12} />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <div className="absolute z-50 mt-2 w-full rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-gray-100">
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search shepherds..."
+                className="w-full pl-9 pr-3 py-2 rounded-md border border-gray-200 text-sm text-black focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
+              />
+            </div>
+          </div>
+          <div className="max-h-52 overflow-y-auto py-1">
+            {filteredShepherds.map((shepherd) => {
+              const selected = selectedIds.includes(shepherd.id);
+              return (
+                <button
+                  key={shepherd.id}
+                  type="button"
+                  onClick={() => onToggle(shepherd.id)}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-sm text-left hover:bg-orange-50"
+                >
+                  <span className="font-medium text-black">{shepherd.full_name}</span>
+                  <span className={`w-5 h-5 rounded border flex items-center justify-center ${selected ? 'bg-orange-500 border-orange-500 text-white' : 'border-gray-300 text-transparent'}`}>
+                    <Check size={13} />
+                  </span>
+                </button>
+              );
+            })}
+            {filteredShepherds.length === 0 && (
+              <div className="px-3 py-6 text-center text-sm text-gray-400">No shepherds found</div>
+            )}
           </div>
         </div>
       )}

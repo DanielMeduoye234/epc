@@ -16,8 +16,20 @@ export interface Profile {
   email: string;
   role: UserRole;
   branch_id: string;
+  bacenta_id: string | null;
   created_at: string;
   branch?: Branch;
+  bacenta?: Bacenta | null;
+  bacentas?: Bacenta[];
+}
+
+export interface ShepherdBacenta {
+  shepherd_id: string;
+  bacenta_id: string;
+  branch_id: string;
+  created_at: string;
+  bacenta?: Bacenta;
+  shepherd?: Profile;
 }
 
 export interface NewBeliever {

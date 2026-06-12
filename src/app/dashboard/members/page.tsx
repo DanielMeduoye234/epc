@@ -78,7 +78,13 @@ export default function MembersPage() {
     if (!profile) return;
     if (isDemo) return;
     supabase.from('bacentas').select('*').eq('branch_id', profile.branch_id).order('name')
-      .then(({ data }: { data: Bacenta[] | null }) => setBacentas(data || []));
+      .then(({ data }: { data: Bacenta[] | null }) => {
+        setBacentas(data || []);
+        const defaultBacenta = profile.bacentas?.[0]?.name || profile.bacenta?.name;
+        if (profile.role === 'shepherd' && defaultBacenta) {
+          setAddForm((prev) => ({ ...prev, bacenta: prev.bacenta || defaultBacenta }));
+        }
+      });
   }, [profile, isDemo]);
 
   async function handleAddMember(e: React.FormEvent) {
@@ -91,7 +97,7 @@ export default function MembersPage() {
         id: `m-${Date.now()}`, first_timer_id: null, full_name: addForm.full_name,
         first_name: null, last_name: null, nickname: null,
         phone_number: addForm.phone_number, address: addForm.address,
-        bacenta: addForm.bacenta || 'Unassigned', who_brought: addForm.who_brought,
+        bacenta: addForm.bacenta || profile!.bacentas?.[0]?.name || profile!.bacenta?.name || 'Unassigned', who_brought: addForm.who_brought,
         date_joined: new Date().toISOString().split('T')[0],
         membership_date: new Date().toISOString().split('T')[0],
         assigned_shepherd: profile!.role === 'shepherd' ? profile!.id : null, branch_id: profile!.branch_id,
@@ -101,7 +107,7 @@ export default function MembersPage() {
     } else {
       await supabase.from('members').insert({
         full_name: addForm.full_name, phone_number: addForm.phone_number,
-        address: addForm.address, bacenta: addForm.bacenta || 'Unassigned',
+        address: addForm.address, bacenta: addForm.bacenta || profile!.bacentas?.[0]?.name || profile!.bacenta?.name || 'Unassigned',
         who_brought: addForm.who_brought,
         date_joined: new Date().toISOString().split('T')[0],
         membership_date: new Date().toISOString().split('T')[0],
@@ -110,7 +116,7 @@ export default function MembersPage() {
       fetchMembers();
     }
 
-    setAddForm({ full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '' });
+    setAddForm({ full_name: '', phone_number: '', address: '', bacenta: profile!.role === 'shepherd' ? profile!.bacentas?.[0]?.name || profile!.bacenta?.name || '' : '', who_brought: '' });
     setShowAddModal(false);
     setAdding(false);
   }
@@ -165,6 +171,12 @@ export default function MembersPage() {
   const deletingMember = members.find(m => m.id === deleteId);
 
   const addMemberBacentas = useMemo(() => {
+    if (profile?.role === 'shepherd') {
+      return profile.bacentas && profile.bacentas.length > 0
+        ? profile.bacentas
+        : profile.bacenta ? [profile.bacenta] : [];
+    }
+
     const map = new Map<string, Bacenta>();
     bacentas.forEach((b) => map.set(b.name, b));
     members.forEach((m) => {
@@ -180,7 +192,7 @@ export default function MembersPage() {
       }
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [bacentas, members]);
+  }, [bacentas, members, profile]);
 
   if (profile?.role === 'recorder') {
     return (

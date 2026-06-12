@@ -47,12 +47,18 @@ export default function FirstTimersPage() {
   }, [profile, isDemo]);
 
   async function fetchFirstTimers() {
-    const { data } = await supabase
+    let query = supabase
       .from('first_timers')
       .select('*')
       .eq('branch_id', profile!.branch_id)
       .eq('status', 'first_timer')
       .order('created_at', { ascending: false });
+
+    if (profile!.role === 'shepherd') {
+      query = query.eq('assigned_shepherd', profile!.id);
+    }
+
+    const { data } = await query;
 
     if (data && data.length > 0) {
       const ids = data.map((ft: FirstTimer) => ft.id);
@@ -222,13 +228,13 @@ export default function FirstTimersPage() {
       )}
 
       {showForm && (
-        <FirstTimerForm branchId={profile!.branch_id} isDemo={isDemo}
+        <FirstTimerForm profile={profile!} isDemo={isDemo}
           onClose={() => setShowForm(false)}
           onSaved={() => { setShowForm(false); if (!isDemo) fetchFirstTimers(); }} />
       )}
 
       {editRecord && (
-        <FirstTimerForm branchId={profile!.branch_id} isDemo={isDemo} initialData={editRecord}
+        <FirstTimerForm profile={profile!} isDemo={isDemo} initialData={editRecord}
           onClose={() => setEditRecord(null)}
           onSaved={() => { setEditRecord(null); if (!isDemo) fetchFirstTimers(); }} />
       )}
@@ -253,9 +259,9 @@ export default function FirstTimersPage() {
 }
 
 function FirstTimerForm({
-  branchId, isDemo, onClose, onSaved, initialData,
+  profile, isDemo, onClose, onSaved, initialData,
 }: {
-  branchId: string; isDemo: boolean; onClose: () => void; onSaved: () => void; initialData?: FirstTimerWithAttendance;
+  profile: NonNullable<ReturnType<typeof useAuth>['profile']>; isDemo: boolean; onClose: () => void; onSaved: () => void; initialData?: FirstTimerWithAttendance;
 }) {
   const supabase = createClient();
   const isEditing = !!initialData;
@@ -267,7 +273,7 @@ function FirstTimerForm({
     last_name: initialData?.last_name || (initialData ? initialData.full_name.split(' ').slice(1).join(' ') : ''),
     nickname: initialData?.nickname || '',
     address: initialData?.address || '',
-    bacenta: initialData?.bacenta || '',
+    bacenta: initialData?.bacenta || profile.bacentas?.[0]?.name || profile.bacenta?.name || '',
     phone_number: initialData?.phone_number || '',
     who_brought: initialData?.who_brought || '',
     birthday: initialData?.birthday || '',
@@ -276,9 +282,13 @@ function FirstTimerForm({
 
   useEffect(() => {
     if (isDemo) { setBacentas(DEMO_BACENTAS); return; }
-    supabase.from('bacentas').select('*').eq('branch_id', branchId).order('name')
+    if (profile.role === 'shepherd') {
+      setBacentas(profile.bacentas && profile.bacentas.length > 0 ? profile.bacentas : profile.bacenta ? [profile.bacenta] : []);
+      return;
+    }
+    supabase.from('bacentas').select('*').eq('branch_id', profile.branch_id).order('name')
       .then(({ data }: { data: Bacenta[] | null }) => setBacentas(data || []));
-  }, [branchId, isDemo]);
+  }, [profile, isDemo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -296,7 +306,12 @@ function FirstTimerForm({
 
     const { error } = isEditing
       ? await supabase.from('first_timers').update(payload).eq('id', initialData!.id)
-      : await supabase.from('first_timers').insert({ ...payload, branch_id: branchId, status: 'first_timer' });
+      : await supabase.from('first_timers').insert({
+        ...payload,
+        branch_id: profile.branch_id,
+        assigned_shepherd: profile.role === 'shepherd' ? profile.id : null,
+        status: 'first_timer',
+      });
 
     if (error) { setFormError(error.message || 'Failed to save.'); setLoading(false); }
     else { onSaved(); }

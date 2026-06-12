@@ -1,4 +1,4 @@
-import { Profile, NewBeliever, FirstTimer, Member, Broadcast, PrayerSchedule, FollowUp, Visitation, Alert, Branch } from './types';
+import { Profile, UserRole, NewBeliever, FirstTimer, Member, Broadcast, PrayerSchedule, FollowUp, Visitation, Alert, Branch } from './types';
 
 // Check if we're in demo mode
 export function isDemoMode(): boolean {
@@ -7,9 +7,9 @@ export function isDemoMode(): boolean {
 }
 
 // Shepherd/Recorder name lookup for super admin views
-export const DEMO_USERS: Record<string, { name: string; role: string }> = {
-  'demo-user-001': { name: 'Shepherd Samuel', role: 'shepherd' },
-  'demo-user-002': { name: 'Shepherd Grace', role: 'shepherd' },
+export const DEMO_USERS: Record<string, { name: string; role: UserRole; bacenta_id?: string | null }> = {
+  'demo-user-001': { name: 'Shepherd Samuel', role: 'shepherd', bacenta_id: 'bac-1' },
+  'demo-user-002': { name: 'Shepherd Grace', role: 'shepherd', bacenta_id: 'bac-2' },
   'demo-recorder-001': { name: 'Recorder Blessing', role: 'recorder' },
   'demo-admin-001': { name: 'Pastor Admin', role: 'super_admin' },
   'demo-bishop-001': { name: 'Bishop Dominion', role: 'bishop' },
@@ -21,6 +21,7 @@ export const DEMO_PROFILE: Profile = {
   email: 'bishop@epc.church',
   role: 'bishop',
   branch_id: 'demo-branch-001',
+  bacenta_id: null,
   created_at: '2025-01-01T00:00:00Z',
   branch: {
     id: 'demo-branch-001',

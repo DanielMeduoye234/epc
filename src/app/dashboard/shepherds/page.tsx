@@ -12,6 +12,7 @@ interface ShepherdProfile {
   id: string;
   name: string;
   email?: string;
+  bacentaNames: string[];
   phone?: string;
   role: string;
   totalSheep: number;
@@ -84,9 +85,9 @@ export default function ShepherdsPage() {
   function loadDemoData() {
     const shepherdIds = Object.entries(DEMO_USERS)
       .filter(([, u]) => u.role === 'shepherd')
-      .map(([id, u]) => ({ id, name: u.name }));
+      .map(([id, u]) => ({ id, name: u.name, bacentaNames: u.bacenta_id === 'bac-1' ? ['Bacenta Alpha'] : u.bacenta_id === 'bac-2' ? ['Bacenta Beta'] : [] }));
 
-    const result: ShepherdProfile[] = shepherdIds.map(({ id, name }) => {
+    const result: ShepherdProfile[] = shepherdIds.map(({ id, name, bacentaNames }) => {
       const sheep = DEMO_MEMBERS.filter(m => m.assigned_shepherd === id);
       const firstTimers = DEMO_FIRST_TIMERS.filter(ft => ft.assigned_shepherd === id);
       const active = sheep.filter(m => m.status === 'active').length;
@@ -121,6 +122,7 @@ export default function ShepherdsPage() {
         id,
         name,
         email: `${name.split(' ')[1]?.toLowerCase()}@epc.church`,
+        bacentaNames,
         role: 'shepherd',
         totalSheep: sheep.length,
         activeSheep: active,
@@ -197,6 +199,29 @@ export default function ShepherdsPage() {
     });
 
     const weekKeys = Array.from(weekKeysSet).sort().slice(-6);
+    const shepherdIds = shepherdProfiles.map((sp: { id: string }) => sp.id);
+    const { data: shepherdBacentas, error: shepherdBacentasError } = shepherdIds.length > 0 ? await supabase
+      .from('shepherd_bacentas')
+      .select('shepherd_id, bacenta:bacentas(name)')
+      .eq('branch_id', profile!.branch_id)
+      .in('shepherd_id', shepherdIds) : { data: [] };
+
+    const bacentaMap: Record<string, string[]> = {};
+    if (shepherdBacentasError) {
+      const { data: legacyProfiles } = await supabase
+        .from('profiles')
+        .select('id, bacenta:bacentas(name)')
+        .eq('branch_id', profile!.branch_id)
+        .eq('role', 'shepherd');
+      (legacyProfiles || []).forEach((row: { id: string; bacenta: { name: string } | null }) => {
+        if (row.bacenta?.name) bacentaMap[row.id] = [row.bacenta.name];
+      });
+    } else {
+      (shepherdBacentas || []).forEach((row: { shepherd_id: string; bacenta: { name: string } | null }) => {
+        if (!bacentaMap[row.shepherd_id]) bacentaMap[row.shepherd_id] = [];
+        if (row.bacenta?.name) bacentaMap[row.shepherd_id].push(row.bacenta.name);
+      });
+    }
 
     const result: ShepherdProfile[] = shepherdProfiles.map((sp: { id: string; full_name: string; email: string }) => {
       const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null }) => m.assigned_shepherd === sp.id);
@@ -241,6 +266,7 @@ export default function ShepherdsPage() {
         id: sp.id,
         name: sp.full_name,
         email: sp.email,
+        bacentaNames: bacentaMap[sp.id] || [],
         role: 'shepherd',
         totalSheep: sheep.length,
         activeSheep: faithful,
@@ -338,6 +364,10 @@ export default function ShepherdsPage() {
                       <span>{shepherd.totalSheep} sheep</span>
                       <span>·</span>
                       <span>{shepherd.firstTimers} first timers</span>
+                      <span>·</span>
+                      <span className="text-orange-600">
+                        {shepherd.bacentaNames.length > 0 ? shepherd.bacentaNames.join(', ') : 'No bacenta assigned'}
+                      </span>
                       {shepherd.email && (
                         <>
                           <span className="hidden sm:inline">·</span>
