@@ -1,8 +1,8 @@
 {
   "name": "The Fold - Everything by Prayer",
   "short_name": "The Fold",
-  "description": "Church management dashboard for EPC - track members, attendance, and spiritual growth",
-  "start_url": "/dashboard",
+  "description": "EPC Guide for counselling access and church data retrieval",
+  "start_url": "/guide",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#f97316",

@@ -813,6 +813,58 @@ CREATE POLICY "Super admins can update branch settings"
   USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
 
 -- ============================================================
+-- EPC GUIDE COUNSELLING TABLES (separate from dashboard data)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE counselling_booking_status AS ENUM ('requested', 'confirmed', 'completed', 'cancelled');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS counselling_pastors (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  phone_number TEXT,
+  bio TEXT,
+  specialties TEXT[] DEFAULT '{}',
+  photo_url TEXT,
+  google_meet_link TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS counselling_members (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  phone_number TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS counselling_bookings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pastor_id UUID NOT NULL REFERENCES counselling_pastors(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL REFERENCES counselling_members(id) ON DELETE CASCADE,
+  scheduled_date DATE NOT NULL,
+  scheduled_time TIME NOT NULL,
+  topic TEXT NOT NULL,
+  notes TEXT,
+  meeting_link TEXT NOT NULL,
+  status counselling_booking_status DEFAULT 'requested',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE counselling_pastors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE counselling_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE counselling_bookings ENABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_counselling_pastors_active ON counselling_pastors(is_active);
+CREATE INDEX IF NOT EXISTS idx_counselling_members_email ON counselling_members(email);
+CREATE INDEX IF NOT EXISTS idx_counselling_bookings_pastor ON counselling_bookings(pastor_id, scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_counselling_bookings_member ON counselling_bookings(member_id, scheduled_date);
+
+-- ============================================================
 -- FUNCTION: Promote First Timers after 2 attendances in same month
 -- ============================================================
 CREATE OR REPLACE FUNCTION promote_first_timers_to_members()

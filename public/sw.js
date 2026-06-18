@@ -1,6 +1,6 @@
-const CACHE_NAME = 'the-fold-v1';
+const CACHE_NAME = 'the-fold-v2';
 const OFFLINE_URLS = [
-  '/dashboard',
+  '/guide',
   '/offline',
 ];
 
