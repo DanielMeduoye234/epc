@@ -1,23 +1,24 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, Bacenta } from '@/lib/types';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
 } from 'recharts';
 import {
   Users, Plus, X, Search, BarChart3, Grid3X3,
   ChevronLeft, ChevronRight, UserCheck, UserX, FolderTree, Edit2,
 } from 'lucide-react';
 import React from 'react';
+import BacentaSelect from '@/components/BacentaSelect';
 
 function getSundaysFromMonth(year: number, month: number): Date[] {
   const sundays: Date[] = [];
   const d = new Date(year, month, 1);
   while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
-  const end = new Date(year, 11, 31);
+  const end = new Date(year, month + 1, 0);
   while (d <= end) {
     sundays.push(new Date(d));
     d.setDate(d.getDate() + 7);
@@ -26,7 +27,10 @@ function getSundaysFromMonth(year: number, month: number): Date[] {
 }
 
 function toDateStr(d: Date) {
-  return d.toISOString().split('T')[0];
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 type Tab = 'overview' | 'tracker';
@@ -37,6 +41,31 @@ interface AddForm {
   address: string;
   bacenta: string;
   who_brought: string;
+  is_first_timer: boolean;
+}
+
+interface WeeklyAttendancePoint {
+  week: string;
+  present: number;
+  absent: number;
+  attendanceRate: number;
+}
+
+interface WeeklyFirstTimerPoint {
+  week: string;
+  count: number;
+}
+
+function getWeekStartKey(dateStr: string): string {
+  const date = new Date(dateStr);
+  const weekStart = new Date(date);
+  weekStart.setDate(date.getDate() - date.getDay());
+  return weekStart.toISOString().split('T')[0];
+}
+
+function getWeekLabel(weekStart: string): string {
+  const date = new Date(weekStart);
+  return date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
 }
 
 export default function ChurchAttendancePage() {
@@ -46,6 +75,8 @@ export default function ChurchAttendancePage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [members, setMembers] = useState<Member[]>([]);
   const [bacentas, setBacentas] = useState<Bacenta[]>([]);
+  const [weeklyAttendance, setWeeklyAttendance] = useState<WeeklyAttendancePoint[]>([]);
+  const [weeklyFirstTimers, setWeeklyFirstTimers] = useState<WeeklyFirstTimerPoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Overview state
@@ -53,7 +84,7 @@ export default function ChurchAttendancePage() {
   const [filterBacenta, setFilterBacenta] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState<AddForm>({
-    full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '',
+    full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '', is_first_timer: false,
   });
   const [adding, setAdding] = useState(false);
 
@@ -67,6 +98,9 @@ export default function ChurchAttendancePage() {
   const [trackerYear, setTrackerYear] = useState(now.getFullYear());
   const [trackerMonth, setTrackerMonth] = useState(now.getMonth());
   const [trackerBacenta, setTrackerBacenta] = useState('all');
+  const [trackerSearch, setTrackerSearch] = useState('');
+  const [selectedSunday, setSelectedSunday] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unmarked' | 'absent' | 'present'>('all');
   const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, boolean>>>({});
   const [loadingAtt, setLoadingAtt] = useState(false);
 
@@ -78,12 +112,54 @@ export default function ChurchAttendancePage() {
 
   async function fetchData() {
     setLoading(true);
-    const [mRes, bRes] = await Promise.all([
+    const eightWeeksAgo = new Date();
+    eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
+    const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
+
+    const [mRes, bRes, attendanceRes, firstTimersRes] = await Promise.all([
       supabase.from('members').select('*').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
       supabase.from('bacentas').select('*').eq('branch_id', profile!.branch_id).order('name'),
+      supabase.from('attendance').select('date, is_present').eq('branch_id', profile!.branch_id).gte('date', weeklyStartDate),
+      supabase.from('first_timers').select('date_joined').eq('branch_id', profile!.branch_id).gte('date_joined', weeklyStartDate),
     ]);
     setMembers(mRes.data || []);
     setBacentas(bRes.data || []);
+
+    const weekSeed: Record<string, WeeklyAttendancePoint> = {};
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() - i * 7);
+      const key = weekStart.toISOString().split('T')[0];
+      weekSeed[key] = { week: getWeekLabel(key), present: 0, absent: 0, attendanceRate: 0 };
+    }
+
+    attendanceRes.data?.forEach((row: { date: string; is_present: boolean }) => {
+      const weekKey = getWeekStartKey(row.date);
+      if (!weekSeed[weekKey]) return;
+      if (row.is_present) weekSeed[weekKey].present += 1;
+      else weekSeed[weekKey].absent += 1;
+    });
+
+    const attendanceSeries = Object.values(weekSeed).map((entry) => {
+      const total = entry.present + entry.absent;
+      return {
+        ...entry,
+        attendanceRate: total > 0 ? Math.round((entry.present / total) * 100) : 0,
+      };
+    });
+    setWeeklyAttendance(attendanceSeries);
+
+    const firstTimerSeed: Record<string, WeeklyFirstTimerPoint> = {};
+    Object.keys(weekSeed).forEach((key) => {
+      firstTimerSeed[key] = { week: getWeekLabel(key), count: 0 };
+    });
+
+    firstTimersRes.data?.forEach((row: { date_joined: string }) => {
+      const weekKey = getWeekStartKey(row.date_joined);
+      if (firstTimerSeed[weekKey]) firstTimerSeed[weekKey].count += 1;
+    });
+    setWeeklyFirstTimers(Object.values(firstTimerSeed));
+
     setLoading(false);
   }
 
@@ -107,22 +183,69 @@ export default function ChurchAttendancePage() {
     setLoadingAtt(false);
   }
 
+  async function toggleAttendance(memberId: string, dateStr: string, next?: boolean | null) {
+    const current = (attendanceMap[memberId] || {})[dateStr];
+    const newVal = next === null
+      ? undefined
+      : typeof next === 'boolean'
+      ? next
+      : current === undefined
+      ? true
+      : current === true
+      ? false
+      : undefined;
+    setAttendanceMap(prev => {
+      const updated = { ...prev, [memberId]: { ...(prev[memberId] || {}) } };
+      if (newVal === undefined) delete updated[memberId][dateStr];
+      else updated[memberId][dateStr] = newVal;
+      return updated;
+    });
+    if (newVal === undefined) {
+      await supabase.from('attendance').delete().eq('person_id', memberId).eq('date', dateStr);
+    } else {
+      await supabase.from('attendance').upsert(
+        { person_id: memberId, date: dateStr, is_present: newVal, branch_id: profile!.branch_id },
+        { onConflict: 'person_id,date' }
+      );
+    }
+  }
+
+  async function bulkSetAttendance(value: boolean | null) {
+    if (!selectedSunday || trackerMembers.length === 0) return;
+    await Promise.all(
+      filteredTrackerMembers.map((m) => toggleAttendance(m.id, selectedSunday, value))
+    );
+  }
+
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
     if (!addForm.full_name || !addForm.phone_number) return;
     setAdding(true);
+    const today = new Date().toISOString().split('T')[0];
     await supabase.from('members').insert({
       full_name: addForm.full_name,
       phone_number: addForm.phone_number,
       address: addForm.address || '',
       bacenta: addForm.bacenta || 'Unassigned',
       who_brought: addForm.who_brought || '',
-      date_joined: new Date().toISOString().split('T')[0],
-      membership_date: new Date().toISOString().split('T')[0],
+      date_joined: today,
+      membership_date: today,
       branch_id: profile!.branch_id,
       status: 'active',
     });
-    setAddForm({ full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '' });
+    if (addForm.is_first_timer) {
+      await supabase.from('first_timers').insert({
+        full_name: addForm.full_name,
+        phone_number: addForm.phone_number,
+        address: addForm.address || '',
+        bacenta: addForm.bacenta || 'Unassigned',
+        who_brought: addForm.who_brought || '',
+        date_joined: today,
+        branch_id: profile!.branch_id,
+        status: 'first_timer',
+      });
+    }
+    setAddForm({ full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '', is_first_timer: false });
     setShowAddModal(false);
     setAdding(false);
     fetchData();
@@ -149,6 +272,24 @@ export default function ChurchAttendancePage() {
     return Array.from(s).sort();
   }, [members]);
 
+  const addMemberBacentas = useMemo(() => {
+    const map = new Map<string, Bacenta>();
+    bacentas.forEach((b) => map.set(b.name, b));
+    allBacentas.forEach((name) => {
+      if (!map.has(name)) {
+        map.set(name, {
+          id: `fallback-${name}`,
+          name,
+          leader_name: null,
+          location: null,
+          branch_id: profile!.branch_id,
+          created_at: new Date().toISOString(),
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [bacentas, allBacentas, profile]);
+
   const chartData = useMemo(() => {
     const counts: Record<string, number> = {};
     members.forEach(m => { counts[m.bacenta] = (counts[m.bacenta] || 0) + 1; });
@@ -163,27 +304,72 @@ export default function ChurchAttendancePage() {
 
   const sundays = useMemo(() => getSundaysFromMonth(trackerYear, trackerMonth), [trackerYear, trackerMonth]);
 
-  const sundaysByMonth = useMemo(() => {
-    const groups: { label: string; dates: Date[] }[] = [];
-    sundays.forEach(s => {
-      const lbl = s.toLocaleString('en', { month: 'short', year: '2-digit' });
-      const last = groups[groups.length - 1];
-      if (last && last.label === lbl) last.dates.push(s);
-      else groups.push({ label: lbl, dates: [s] });
-    });
-    return groups;
-  }, [sundays]);
-
   const trackerMembers = useMemo(() =>
-    members.filter(m => trackerBacenta === 'all' || m.bacenta === trackerBacenta),
-    [members, trackerBacenta]);
+    members.filter(m =>
+      (trackerBacenta === 'all' || m.bacenta === trackerBacenta) &&
+      m.full_name.toLowerCase().includes(trackerSearch.toLowerCase())
+    ),
+    [members, trackerBacenta, trackerSearch]);
 
-  const trackerBacentaList = useMemo(() =>
-    allBacentas.filter(b => trackerBacenta === 'all' || b === trackerBacenta),
-    [allBacentas, trackerBacenta]);
+  useEffect(() => {
+    const availableSundays = sundays.map(toDateStr);
+    if (availableSundays.length === 0) {
+      setSelectedSunday('');
+      return;
+    }
+    if (!selectedSunday || !availableSundays.includes(selectedSunday)) {
+      setSelectedSunday(availableSundays[0]);
+    }
+  }, [sundays, selectedSunday]);
 
   const totalActive = members.filter(m => m.status === 'active').length;
   const totalFlagged = members.filter(m => m.status === 'flagged').length;
+
+  const filteredTrackerMembers = useMemo(() => {
+    if (!selectedSunday || statusFilter === 'all') return trackerMembers;
+    return trackerMembers.filter((m) => {
+      const value = (attendanceMap[m.id] || {})[selectedSunday];
+      if (statusFilter === 'unmarked') return value === undefined;
+      if (statusFilter === 'absent') return value === false;
+      if (statusFilter === 'present') return value === true;
+      return true;
+    });
+  }, [trackerMembers, attendanceMap, selectedSunday, statusFilter]);
+
+  const groupedFilteredTrackerMembers = useMemo(() => {
+    const map: Record<string, Member[]> = {};
+    filteredTrackerMembers.forEach((m) => {
+      if (!map[m.bacenta]) map[m.bacenta] = [];
+      map[m.bacenta].push(m);
+    });
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+  }, [filteredTrackerMembers]);
+
+  const selectedDayStats = useMemo(() => {
+    if (!selectedSunday) return { present: 0, absent: 0, unmarked: trackerMembers.length };
+    const present = trackerMembers.filter((m) => (attendanceMap[m.id] || {})[selectedSunday] === true).length;
+    const absent = trackerMembers.filter((m) => (attendanceMap[m.id] || {})[selectedSunday] === false).length;
+    const unmarked = trackerMembers.length - present - absent;
+    return { present, absent, unmarked };
+  }, [trackerMembers, attendanceMap, selectedSunday]);
+
+  const sundayRecords = useMemo(() => {
+    const scopedMembers = members.filter((m) => trackerBacenta === 'all' || m.bacenta === trackerBacenta);
+    return sundays.map((s) => {
+      const dayKey = toDateStr(s);
+      const present = scopedMembers.filter((m) => (attendanceMap[m.id] || {})[dayKey] === true).length;
+      const absent = scopedMembers.filter((m) => (attendanceMap[m.id] || {})[dayKey] === false).length;
+      const total = present + absent;
+      return {
+        dayKey,
+        label: s.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short' }),
+        present,
+        absent,
+        total,
+        attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
+      };
+    });
+  }, [sundays, members, trackerBacenta, attendanceMap]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -201,7 +387,7 @@ export default function ChurchAttendancePage() {
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
+          className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
         >
           <Plus size={18} />
           Add Member
@@ -240,6 +426,39 @@ export default function ChurchAttendancePage() {
                 <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
               </div>
             ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <h3 className="font-semibold text-black mb-4 text-sm">Weekly Attendance Chart (Last 8 Weeks)</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={weeklyAttendance} margin={{ top: 5, right: 10, left: 0, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6b7280' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} allowDecimals={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} />
+                    <Bar dataKey="present" fill="#22c55e" name="Present" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <h3 className="font-semibold text-black mb-4 text-sm">Weekly First Timers Chart (Last 8 Weeks)</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={weeklyFirstTimers} margin={{ top: 5, right: 10, left: 0, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6b7280' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} allowDecimals={false} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} />
+                    <Line type="monotone" dataKey="count" stroke="#f97316" strokeWidth={3} dot={{ r: 4 }} name="First Timers" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
 
           {/* Bacentas Card */}
@@ -382,7 +601,7 @@ export default function ChurchAttendancePage() {
               >
                 <ChevronLeft size={18} />
               </button>
-              <span className="font-bold text-black min-w-[120px] text-center text-sm">
+              <span className="font-bold text-black min-w-30 text-center text-sm">
                 {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
               </span>
               <button
@@ -402,9 +621,75 @@ export default function ChurchAttendancePage() {
               {allBacentas.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
 
+            <select
+              value={selectedSunday}
+              onChange={(e) => setSelectedSunday(e.target.value)}
+              className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-black outline-none focus:ring-2 focus:ring-orange-500"
+              disabled={sundays.length === 0}
+            >
+              {sundays.length === 0 ? (
+                <option value="">No Sundays in selected month</option>
+              ) : (
+                sundays.map((s) => {
+                  const ds = toDateStr(s);
+                  return (
+                    <option key={ds} value={ds}>
+                      {s.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short' })}
+                    </option>
+                  );
+                })
+              )}
+            </select>
+
             <span className="text-xs text-gray-400">
               {sundays.length} Sundays &middot; {trackerMembers.length} members
             </span>
+          </div>
+
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={trackerSearch}
+              onChange={(e) => setTrackerSearch(e.target.value)}
+              placeholder="Search member name..."
+              className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-black outline-none focus:ring-2 focus:ring-orange-500"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {([
+              { key: 'all', label: 'All' },
+              { key: 'unmarked', label: 'Unmarked' },
+              { key: 'absent', label: 'Absent' },
+              { key: 'present', label: 'Present' },
+            ] as const).map((item) => (
+              <button
+                key={item.key}
+                onClick={() => setStatusFilter(item.key)}
+                className={`px-3 py-1.5 text-xs rounded-full border transition ${
+                  statusFilter === item.key
+                    ? 'bg-orange-500 border-orange-500 text-white'
+                    : 'bg-white border-gray-200 text-gray-600 hover:border-orange-300'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+            <button
+              onClick={() => bulkSetAttendance(true)}
+              className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 transition"
+              disabled={!selectedSunday || filteredTrackerMembers.length === 0}
+            >
+              Mark Visible Present
+            </button>
+            <button
+              onClick={() => bulkSetAttendance(null)}
+              className="px-3 py-1.5 text-xs rounded-lg bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100 transition"
+              disabled={!selectedSunday || filteredTrackerMembers.length === 0}
+            >
+              Clear Visible
+            </button>
           </div>
 
           {/* Legend */}
@@ -420,122 +705,135 @@ export default function ChurchAttendancePage() {
             </span>
           </div>
 
+          {selectedSunday && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-white rounded-lg border border-gray-100 p-3 text-center">
+                <p className="text-[10px] uppercase text-gray-500">Present</p>
+                <p className="text-xl font-bold text-green-600">{selectedDayStats.present}</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-100 p-3 text-center">
+                <p className="text-[10px] uppercase text-gray-500">Absent</p>
+                <p className="text-xl font-bold text-red-500">{selectedDayStats.absent}</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-100 p-3 text-center">
+                <p className="text-[10px] uppercase text-gray-500">Unmarked</p>
+                <p className="text-xl font-bold text-gray-500">{selectedDayStats.unmarked}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <h3 className="text-sm font-semibold text-black">Sunday Records (Stored Attendance)</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Present and absent totals saved for each Sunday in this month.</p>
+            </div>
+            {sundayRecords.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-400">No Sundays in this month.</div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {sundayRecords.map((record) => (
+                  <button
+                    key={record.dayKey}
+                    onClick={() => setSelectedSunday(record.dayKey)}
+                    className={`w-full px-4 py-3 text-left transition ${
+                      selectedSunday === record.dayKey ? 'bg-orange-50' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-black">{record.label}</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Total in church: <span className="font-semibold text-gray-700">{record.total}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
+                        <span className="text-green-700">Present: {record.present}</span>
+                        <span className="text-red-600">Absent: {record.absent}</span>
+                        <span className="text-gray-600">Rate: {record.attendanceRate}%</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {loadingAtt ? (
             <div className="flex justify-center py-16">
               <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-                <table className="border-collapse text-xs" style={{ minWidth: `${200 + sundays.length * 34}px` }}>
-                  <thead className="sticky top-0 z-20">
-                    {/* Month row */}
-                    <tr>
-                      <th
-                        className="sticky left-0 z-30 bg-gray-50 px-3 py-2 text-left font-semibold text-gray-700 border-b border-r border-gray-200"
-                        style={{ minWidth: 200 }}
-                      >
-                        <div className="flex items-center gap-1">
-                          <Users size={13} className="text-orange-500" />
-                          Member
-                        </div>
-                      </th>
-                      {sundaysByMonth.map(({ label, dates }) => (
-                        <th
-                          key={label}
-                          colSpan={dates.length}
-                          className="px-2 py-2 text-center font-semibold text-orange-700 bg-orange-50 border-b border-l border-gray-200 whitespace-nowrap"
-                        >
-                          {label}
-                        </th>
-                      ))}
-                      <th className="px-2 py-2 text-center font-semibold text-gray-700 bg-gray-50 border-b border-l border-gray-200 whitespace-nowrap">
-                        Total
-                      </th>
-                    </tr>
-                    {/* Date row */}
-                    <tr>
-                      <th className="sticky left-0 z-30 bg-gray-50 px-3 py-1.5 border-b border-r border-gray-200" style={{ minWidth: 200 }}></th>
-                      {sundays.map(s => (
-                        <th
-                          key={toDateStr(s)}
-                          className="px-0.5 py-1.5 text-center border-b border-l border-gray-100 bg-white font-normal text-gray-500"
-                          style={{ minWidth: 30 }}
-                        >
-                          <div className="text-[10px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: 44 }}>
-                            {s.toLocaleDateString('en', { month: 'numeric', day: 'numeric' })}
-                          </div>
-                        </th>
-                      ))}
-                      <th className="px-2 py-1.5 text-center border-b border-l border-gray-100 bg-white text-[10px] text-gray-500">%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trackerBacentaList.map(bacenta => {
-                      const bMembers = trackerMembers.filter(m => m.bacenta === bacenta);
-                      if (bMembers.length === 0) return null;
-                      return (
-                        <React.Fragment key={bacenta}>
-                          {/* Bacenta header row */}
-                          <tr>
-                            <td
-                              colSpan={sundays.length + 2}
-                              className="sticky left-0 px-3 py-1.5 text-[11px] font-bold text-orange-700 uppercase tracking-wide bg-orange-50 border-b border-gray-200"
-                            >
-                              {bacenta}
-                              <span className="text-orange-400 font-normal ml-1">({bMembers.length})</span>
-                            </td>
-                          </tr>
-                          {bMembers.map((member, idx) => {
-                            const mAtt = attendanceMap[member.id] || {};
-                            const recorded = sundays.filter(s => mAtt[toDateStr(s)] !== undefined).length;
-                            const present = sundays.filter(s => mAtt[toDateStr(s)] === true).length;
-                            const pct = recorded > 0 ? Math.round((present / recorded) * 100) : null;
-                            return (
-                              <tr key={member.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
-                                <td
-                                  className="sticky left-0 z-10 bg-inherit px-3 py-1 border-r border-gray-200 font-medium text-black whitespace-nowrap"
-                                  style={{ minWidth: 200 }}
+              {!selectedSunday ? (
+                <div className="text-center py-12 text-gray-400">Select a Sunday to start marking attendance.</div>
+              ) : filteredTrackerMembers.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">No members found for this filter.</div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {groupedFilteredTrackerMembers.map(([bacenta, groupMembers]) => (
+                    <div key={bacenta}>
+                      <div className="px-4 py-2 bg-orange-50 border-b border-orange-100 text-xs font-semibold text-orange-700 uppercase tracking-wide">
+                        {bacenta} <span className="text-orange-400 normal-case">({groupMembers.length})</span>
+                      </div>
+                      <div className="divide-y divide-gray-50">
+                        {groupMembers.map((member) => {
+                          const value = (attendanceMap[member.id] || {})[selectedSunday];
+                          return (
+                            <div key={member.id} className="px-3 py-2">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <div>
+                                  <p className="text-sm font-medium text-black leading-tight">{member.full_name}</p>
+                                </div>
+                                <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${
+                                  value === true
+                                    ? 'bg-green-100 text-green-700'
+                                    : value === false
+                                    ? 'bg-red-100 text-red-700'
+                                    : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {value === true ? 'Present' : value === false ? 'Absent' : 'Not recorded'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <button
+                                  onClick={() => toggleAttendance(member.id, selectedSunday, true)}
+                                  className={`py-1.5 rounded-lg text-xs font-medium transition border ${
+                                    value === true
+                                      ? 'bg-green-500 border-green-500 text-white'
+                                      : 'bg-white border-gray-200 text-gray-600 hover:border-green-300'
+                                  }`}
                                 >
-                                  {member.full_name}
-                                </td>
-                                {sundays.map(s => {
-                                  const ds = toDateStr(s);
-                                  const val = mAtt[ds];
-                                  return (
-                                    <td key={ds} className="px-0.5 py-1 text-center border-l border-gray-100">
-                                      <div className={`w-5 h-5 rounded mx-auto ${
-                                        val === true ? 'bg-green-500' :
-                                        val === false ? 'bg-red-400' : 'bg-gray-200'
-                                      }`} />
-                                    </td>
-                                  );
-                                })}
-                                <td className="px-2 py-1 text-center border-l border-gray-100 font-medium">
-                                  {pct !== null ? (
-                                    <span className={`text-[11px] ${pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-amber-500' : 'text-red-500'}`}>
-                                      {pct}%
-                                    </span>
-                                  ) : (
-                                    <span className="text-gray-300 text-[11px]">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
-                    {trackerMembers.length === 0 && (
-                      <tr>
-                        <td colSpan={sundays.length + 2} className="text-center py-12 text-gray-400">
-                          No members to display
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                                  Present
+                                </button>
+                                <button
+                                  onClick={() => toggleAttendance(member.id, selectedSunday, false)}
+                                  className={`py-1.5 rounded-lg text-xs font-medium transition border ${
+                                    value === false
+                                      ? 'bg-red-500 border-red-500 text-white'
+                                      : 'bg-white border-gray-200 text-gray-600 hover:border-red-300'
+                                  }`}
+                                >
+                                  Absent
+                                </button>
+                                <button
+                                  onClick={() => toggleAttendance(member.id, selectedSunday, null)}
+                                  className={`py-1.5 rounded-lg text-xs font-medium transition border ${
+                                    value === undefined
+                                      ? 'bg-gray-600 border-gray-600 text-white'
+                                      : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'
+                                  }`}
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -574,20 +872,16 @@ export default function ChurchAttendancePage() {
                   placeholder="+234..."
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Assign to Bacenta *</label>
-                <select
-                  value={addForm.bacenta}
-                  onChange={e => setAddForm(p => ({ ...p, bacenta: e.target.value }))}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-black text-sm focus:ring-2 focus:ring-orange-500 outline-none"
-                >
-                  <option value="">Select bacenta...</option>
-                  {bacentas.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-                  {allBacentas.filter(b => !bacentas.find(x => x.name === b)).map(b => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-              </div>
+              <BacentaSelect
+                label="Assign to Bacenta *"
+                required
+                value={addForm.bacenta}
+                onChange={(value) => setAddForm((p) => ({ ...p, bacenta: value }))}
+                bacentas={addMemberBacentas}
+                includeLeader
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-black text-sm focus:ring-2 focus:ring-orange-500 outline-none bg-white"
+                placeholder="Select a bacenta..."
+              />
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                 <input
@@ -608,10 +902,22 @@ export default function ChurchAttendancePage() {
                   placeholder="Name of person"
                 />
               </div>
+              <label className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addForm.is_first_timer}
+                  onChange={e => setAddForm(p => ({ ...p, is_first_timer: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-orange-500 rounded cursor-pointer"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-700">This is a First Timer</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">Will also appear on the First Timers page</span>
+                </div>
+              </label>
               <button
                 type="submit"
                 disabled={adding}
-                className="w-full py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
+                className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
               >
                 {adding ? 'Adding...' : 'Add Member'}
               </button>
@@ -665,7 +971,7 @@ export default function ChurchAttendancePage() {
               <button
                 type="submit"
                 disabled={addingBacenta}
-                className="w-full py-3 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
+                className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
               >
                 {addingBacenta ? 'Adding...' : 'Add Bacenta'}
               </button>
@@ -676,3 +982,4 @@ export default function ChurchAttendancePage() {
     </div>
   );
 }
+

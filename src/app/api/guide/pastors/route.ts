@@ -1,6 +1,22 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
 
+interface SupabaseLikeError {
+  code?: string;
+  message: string;
+}
+
+function errorResponse(error: SupabaseLikeError, fallbackStatus = 500) {
+  if (error.code === '42P01') {
+    return NextResponse.json(
+      { error: 'Counselling tables are not set up yet. Run the EPC Guide counselling schema in Supabase.' },
+      { status: 503 }
+    );
+  }
+
+  return NextResponse.json({ error: error.message }, { status: fallbackStatus });
+}
+
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -18,7 +34,7 @@ export async function GET() {
     .order('created_at', { ascending: false });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return errorResponse(error);
   }
 
   return NextResponse.json({ pastors: data || [] });
@@ -64,7 +80,7 @@ export async function POST(request: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return errorResponse(error);
     }
 
     return NextResponse.json({ pastor: data });

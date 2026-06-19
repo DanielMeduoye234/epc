@@ -20,6 +20,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (isPublicPath) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -47,13 +51,10 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
 
   if (
-    !user &&
-    !isPublicPath
+    !user
   ) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';

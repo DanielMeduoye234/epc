@@ -1,6 +1,22 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
 
+interface SupabaseLikeError {
+  code?: string;
+  message: string;
+}
+
+function errorResponse(error: SupabaseLikeError, fallbackStatus = 500) {
+  if (error.code === '42P01') {
+    return NextResponse.json(
+      { error: 'Counselling tables are not set up yet. Run the EPC Guide counselling schema in Supabase.' },
+      { status: 503 }
+    );
+  }
+
+  return NextResponse.json({ error: error.message }, { status: fallbackStatus });
+}
+
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -28,7 +44,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (pastorError) {
-      return NextResponse.json({ error: pastorError.message }, { status: 500 });
+      return errorResponse(pastorError);
     }
 
     if (!pastor || !pastor.is_active) {
@@ -59,7 +75,7 @@ export async function POST(request: Request) {
       .single();
 
     if (memberError) {
-      return NextResponse.json({ error: memberError.message }, { status: 500 });
+      return errorResponse(memberError);
     }
 
     const { data: booking, error: bookingError } = await admin
@@ -78,7 +94,7 @@ export async function POST(request: Request) {
       .single();
 
     if (bookingError) {
-      return NextResponse.json({ error: bookingError.message }, { status: 500 });
+      return errorResponse(bookingError);
     }
 
     return NextResponse.json({ booking });
