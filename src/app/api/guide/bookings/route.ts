@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createGoogleMeetEvent } from '@/lib/google-calendar';
 import { NextResponse } from 'next/server';
 
 interface SupabaseLikeError {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
     const { data: pastor, error: pastorError } = await admin
       .from('counselling_pastors')
-      .select('id, full_name, google_meet_link, is_active')
+      .select('id, full_name, email, is_active')
       .eq('id', pastorId)
       .maybeSingle();
 
@@ -78,6 +79,23 @@ export async function POST(request: Request) {
       return errorResponse(memberError);
     }
 
+    let meetEvent: Awaited<ReturnType<typeof createGoogleMeetEvent>>;
+    try {
+      meetEvent = await createGoogleMeetEvent({
+        pastorName: pastor.full_name,
+        pastorEmail: pastor.email,
+        memberName,
+        memberEmail,
+        scheduledDate,
+        scheduledTime,
+        topic,
+        notes: body.notes ? String(body.notes).trim() : null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google Meet could not be generated.';
+      return NextResponse.json({ error: message }, { status: 503 });
+    }
+
     const { data: booking, error: bookingError } = await admin
       .from('counselling_bookings')
       .insert({
@@ -87,10 +105,11 @@ export async function POST(request: Request) {
         scheduled_time: scheduledTime,
         topic,
         notes: body.notes ? String(body.notes).trim() : null,
-        meeting_link: pastor.google_meet_link,
+        meeting_link: meetEvent.meetLink,
+        google_calendar_event_id: meetEvent.eventId,
         status: 'requested',
       })
-      .select('id, scheduled_date, scheduled_time, topic, meeting_link, status, pastor:counselling_pastors(full_name), member:counselling_members(full_name, email)')
+      .select('id, scheduled_date, scheduled_time, topic, meeting_link, google_calendar_event_id, status, pastor:counselling_pastors(full_name), member:counselling_members(full_name, email)')
       .single();
 
     if (bookingError) {

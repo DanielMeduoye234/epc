@@ -23,6 +23,7 @@ import {
   Building2,
   FileText,
   ClipboardList,
+  Gift,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -35,6 +36,7 @@ const navigation = [
   { name: 'Bacentas', href: '/dashboard/bacentas', icon: FolderTree, roles: ['bishop', 'super_admin'] },
   { name: 'Shepherds', href: '/dashboard/shepherds', icon: Users, roles: ['bishop', 'super_admin'] },
   { name: 'Church Attendance', href: '/dashboard/church-attendance', icon: ClipboardList, roles: ['bishop', 'super_admin'] },
+  { name: 'Birthdays', href: '/dashboard/birthdays', icon: Gift, roles: ['bishop', 'super_admin'] },
   { name: "Shepherd's Data", href: '/dashboard/attendance', icon: CalendarCheck, roles: ['bishop', 'super_admin', 'shepherd'] },
   { name: 'Alerts', href: '/dashboard/alerts', icon: Bell, roles: ['bishop', 'super_admin', 'shepherd'] },
   { name: 'Follow-ups', href: '/dashboard/follow-ups', icon: Phone, roles: ['bishop', 'super_admin', 'shepherd'] },

@@ -12,7 +12,6 @@ interface CounsellingPastor {
   bio: string | null;
   specialties: string[] | null;
   photo_url: string | null;
-  google_meet_link: string;
 }
 
 type ViewMode = 'book' | 'pastor';
@@ -28,7 +27,7 @@ export default function CounsellingPage() {
   const [pastorStatus, setPastorStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [pastorLoading, setPastorLoading] = useState(false);
   const [bookingForm, setBookingForm] = useState({ full_name: '', email: '', phone_number: '', scheduled_date: '', scheduled_time: '', topic: '', notes: '' });
-  const [pastorForm, setPastorForm] = useState({ full_name: '', email: '', phone_number: '', bio: '', specialties: '', google_meet_link: '', photo_url: '' });
+  const [pastorForm, setPastorForm] = useState({ full_name: '', email: '', phone_number: '', bio: '', specialties: '', photo_url: '' });
 
   useEffect(() => {
     fetchPastors();
@@ -92,7 +91,7 @@ export default function CounsellingPage() {
       return;
     }
     setPastorStatus({ type: 'success', message: 'Pastor profile saved. Members can now book counselling with you.' });
-    setPastorForm({ full_name: '', email: '', phone_number: '', bio: '', specialties: '', google_meet_link: '', photo_url: '' });
+    setPastorForm({ full_name: '', email: '', phone_number: '', bio: '', specialties: '', photo_url: '' });
     setPastorLoading(false);
     fetchPastors();
   }
@@ -123,7 +122,7 @@ export default function CounsellingPage() {
       setBookingLoading(false);
       return;
     }
-    setBookingStatus({ type: 'success', message: 'Counselling session requested. Use the Google Meet link at the scheduled time.', meetingLink: body.booking?.meeting_link });
+    setBookingStatus({ type: 'success', message: 'Counselling session requested. Google Calendar invitations have been sent to both emails.', meetingLink: body.booking?.meeting_link });
     setBookingForm({ full_name: '', email: '', phone_number: '', scheduled_date: '', scheduled_time: '', topic: '', notes: '' });
     setSelectedPastorId('');
     setBookingLoading(false);
@@ -150,7 +149,7 @@ export default function CounsellingPage() {
           <div className="rounded-2xl border border-orange-100 bg-white p-6 shadow-sm">
             <HeartHandshake className="mb-4 text-orange-600" size={34} />
             <h1 className="text-3xl font-black tracking-normal text-gray-950">Private online counselling with EPC pastors.</h1>
-            <p className="mt-4 leading-7 text-gray-600">This section keeps counselling records separate from the church growth dashboard. Pastors register here, members book here.</p>
+            <p className="mt-4 leading-7 text-gray-600">This section keeps counselling records separate from the church growth dashboard. Bookings generate a Google Meet link and email both parties.</p>
             <div className="mt-6 grid grid-cols-3 gap-3">
               <div className="rounded-xl bg-orange-50 p-3 text-center"><Video className="mx-auto text-orange-600" size={20} /><p className="mt-2 text-xs font-medium">Google Meet</p></div>
               <div className="rounded-xl bg-orange-50 p-3 text-center"><Clock className="mx-auto text-orange-600" size={20} /><p className="mt-2 text-xs font-medium">Timed sessions</p></div>
@@ -219,7 +218,6 @@ export default function CounsellingPage() {
                 <input required type="email" value={pastorForm.email} onChange={(e) => setPastorForm({ ...pastorForm, email: e.target.value })} placeholder="Email" className="rounded-xl border border-gray-200 px-4 py-3 text-black outline-none focus:ring-2 focus:ring-orange-500" />
               </div>
               <input value={pastorForm.phone_number} onChange={(e) => setPastorForm({ ...pastorForm, phone_number: e.target.value })} placeholder="Phone number" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-black outline-none focus:ring-2 focus:ring-orange-500" />
-              <input required value={pastorForm.google_meet_link} onChange={(e) => setPastorForm({ ...pastorForm, google_meet_link: e.target.value })} placeholder="Google Meet link, https://meet.google.com/..." className="w-full rounded-xl border border-gray-200 px-4 py-3 text-black outline-none focus:ring-2 focus:ring-orange-500" />
               <input value={pastorForm.specialties} onChange={(e) => setPastorForm({ ...pastorForm, specialties: e.target.value })} placeholder="Specialties, comma separated" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-black outline-none focus:ring-2 focus:ring-orange-500" />
               <textarea value={pastorForm.bio} onChange={(e) => setPastorForm({ ...pastorForm, bio: e.target.value })} placeholder="Short introduction" rows={4} className="w-full resize-none rounded-xl border border-gray-200 px-4 py-3 text-black outline-none focus:ring-2 focus:ring-orange-500" />
               <button disabled={pastorLoading} className="w-full rounded-xl bg-orange-500 py-3 font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50">{pastorLoading ? 'Saving...' : 'Register as pastor'}</button>

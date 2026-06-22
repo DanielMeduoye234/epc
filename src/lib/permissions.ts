@@ -21,6 +21,8 @@ export type Permission =
   | 'attendance.view'
   | 'attendance.mark'
   | 'attendance.analytics'
+  | 'birthdays.view'
+  | 'birthdays.send'
   | 'epc_news.view'
   | 'epc_news.create'
   | 'prayers.view'
@@ -44,6 +46,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'attendance.view',
     'attendance.mark',
     'attendance.analytics',
+    'birthdays.view',
+    'birthdays.send',
     'epc_news.view',
     'epc_news.create',
     'prayers.view',
@@ -66,6 +70,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'attendance.view',
     'attendance.mark',
     'attendance.analytics',
+    'birthdays.view',
+    'birthdays.send',
     'epc_news.view',
     'epc_news.create',
     'prayers.view',
@@ -123,6 +129,7 @@ export const NAV_PERMISSIONS: Record<string, Permission[]> = {
   '/dashboard/members': ['members.view'],
   '/dashboard/bacentas': ['bacentas.view'],
   '/dashboard/attendance': ['attendance.view'],
+  '/dashboard/birthdays': ['birthdays.view'],
   '/dashboard/epc-news': ['epc_news.view'],
   '/dashboard/prayers': ['prayers.view'],
   '/dashboard/settings': ['settings.view'],

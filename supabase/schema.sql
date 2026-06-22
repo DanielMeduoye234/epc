@@ -829,10 +829,12 @@ CREATE TABLE IF NOT EXISTS counselling_pastors (
   bio TEXT,
   specialties TEXT[] DEFAULT '{}',
   photo_url TEXT,
-  google_meet_link TEXT NOT NULL,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+ALTER TABLE counselling_pastors
+  DROP COLUMN IF EXISTS google_meet_link;
 
 CREATE TABLE IF NOT EXISTS counselling_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -851,9 +853,13 @@ CREATE TABLE IF NOT EXISTS counselling_bookings (
   topic TEXT NOT NULL,
   notes TEXT,
   meeting_link TEXT NOT NULL,
+  google_calendar_event_id TEXT,
   status counselling_booking_status DEFAULT 'requested',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+ALTER TABLE counselling_bookings
+  ADD COLUMN IF NOT EXISTS google_calendar_event_id TEXT;
 
 ALTER TABLE counselling_pastors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE counselling_members ENABLE ROW LEVEL SECURITY;
@@ -863,6 +869,43 @@ CREATE INDEX IF NOT EXISTS idx_counselling_pastors_active ON counselling_pastors
 CREATE INDEX IF NOT EXISTS idx_counselling_members_email ON counselling_members(email);
 CREATE INDEX IF NOT EXISTS idx_counselling_bookings_pastor ON counselling_bookings(pastor_id, scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_counselling_bookings_member ON counselling_bookings(member_id, scheduled_date);
+
+-- ============================================================
+-- BIRTHDAY WHATSAPP MESSAGE TRACKING
+-- ============================================================
+CREATE TABLE IF NOT EXISTS birthday_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  member_id UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  birthday_date DATE NOT NULL,
+  message TEXT NOT NULL,
+  sent_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  whatsapp_status TEXT NOT NULL DEFAULT 'sent' CHECK (whatsapp_status IN ('sent', 'failed')),
+  error TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(member_id, birthday_date)
+);
+
+ALTER TABLE birthday_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Super admins can view birthday messages" ON birthday_messages;
+DROP POLICY IF EXISTS "Super admins can insert birthday messages" ON birthday_messages;
+DROP POLICY IF EXISTS "Super admins can update birthday messages" ON birthday_messages;
+
+CREATE POLICY "Super admins can view birthday messages"
+  ON birthday_messages FOR SELECT
+  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
+
+CREATE POLICY "Super admins can insert birthday messages"
+  ON birthday_messages FOR INSERT
+  WITH CHECK (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
+
+CREATE POLICY "Super admins can update birthday messages"
+  ON birthday_messages FOR UPDATE
+  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
+
+CREATE INDEX IF NOT EXISTS idx_birthday_messages_branch ON birthday_messages(branch_id, birthday_date);
+CREATE INDEX IF NOT EXISTS idx_birthday_messages_member ON birthday_messages(member_id, birthday_date);
 
 -- ============================================================
 -- FUNCTION: Promote First Timers after 2 attendances in same month
