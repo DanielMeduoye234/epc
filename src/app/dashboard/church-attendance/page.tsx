@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import {
   Users, Plus, X, Search, BarChart3, Grid3X3,
-  ChevronLeft, ChevronRight, UserCheck, UserX, FolderTree, Edit2,
+  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, Edit2,
 } from 'lucide-react';
 import React from 'react';
 import BacentaSelect from '@/components/BacentaSelect';
@@ -103,6 +103,7 @@ export default function ChurchAttendancePage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'unmarked' | 'absent' | 'present'>('all');
   const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, boolean>>>({});
   const [loadingAtt, setLoadingAtt] = useState(false);
+  const [showSundayRecords, setShowSundayRecords] = useState(false);
 
   useEffect(() => { if (profile) fetchData(); }, [profile]);
 
@@ -723,15 +724,27 @@ export default function ChurchAttendancePage() {
           )}
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <h3 className="text-sm font-semibold text-black">Sunday Records (Stored Attendance)</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Present and absent totals saved for each Sunday in this month.</p>
-            </div>
-            {sundayRecords.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-gray-400">No Sundays in this month.</div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {sundayRecords.map((record) => (
+            <button
+              type="button"
+              onClick={() => setShowSundayRecords((prev) => !prev)}
+              aria-expanded={showSundayRecords}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 transition"
+            >
+              <div>
+                <h3 className="text-sm font-semibold text-black">Sunday Records (Stored Attendance)</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Present and absent totals saved for each Sunday in this month.</p>
+              </div>
+              <ChevronDown
+                size={18}
+                className={`text-gray-400 shrink-0 transition-transform ${showSundayRecords ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {showSundayRecords && (
+              sundayRecords.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-gray-400 border-t border-gray-100">No Sundays in this month.</div>
+              ) : (
+                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                  {sundayRecords.map((record) => (
                   <button
                     key={record.dayKey}
                     onClick={() => setSelectedSunday(record.dayKey)}
@@ -752,9 +765,10 @@ export default function ChurchAttendancePage() {
                         <span className="text-gray-600">Rate: {record.attendanceRate}%</span>
                       </div>
                     </div>
-                  </button>
-                ))}
-              </div>
+                    </button>
+                  ))}
+                </div>
+              )
             )}
           </div>
 

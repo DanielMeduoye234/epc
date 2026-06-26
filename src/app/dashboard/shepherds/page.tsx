@@ -75,6 +75,8 @@ export default function ShepherdsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance', filter }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'first_timers', filter }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shepherd_bacentas', filter }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bacentas', filter }, refresh)
       .subscribe();
 
     return () => {
@@ -224,8 +226,15 @@ export default function ShepherdsPage() {
     }
 
     const result: ShepherdProfile[] = shepherdProfiles.map((sp: { id: string; full_name: string; email: string }) => {
-      const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null }) => m.assigned_shepherd === sp.id);
-      const firstTimers = (allFirstTimers || []).filter((ft: { assigned_shepherd: string | null }) => ft.assigned_shepherd === sp.id);
+      // A member belongs to this shepherd if they sit in one of the shepherd's
+      // assigned bacentas, or were explicitly assigned to them directly.
+      const shepherdBacentaNames = bacentaMap[sp.id] || [];
+      const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null; bacenta: string }) =>
+        m.assigned_shepherd === sp.id || shepherdBacentaNames.includes(m.bacenta)
+      );
+      const firstTimers = (allFirstTimers || []).filter((ft: { assigned_shepherd: string | null; bacenta: string }) =>
+        ft.assigned_shepherd === sp.id || shepherdBacentaNames.includes(ft.bacenta)
+      );
       const members: ShepherdMember[] = sheep.map((m: { id: string; full_name: string; photo_url: string | null; status: string; bacenta: string; phone_number: string; date_joined: string }) => {
         const record = attendanceMap[m.id] || { present: 0, total: 0 };
         const rate = record.total > 0 ? Math.round((record.present / record.total) * 100) : 0;

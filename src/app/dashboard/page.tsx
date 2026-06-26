@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Heart, UserPlus, Users, AlertTriangle, CheckCircle, XCircle, TrendingUp, Building2, Bell, MapPin, Phone } from 'lucide-react';
@@ -29,25 +29,6 @@ interface Stats {
   flaggedMembers: number;
 }
 
-interface MonthlyData {
-  month: string;
-  newBelievers: number;
-  firstTimers: number;
-  members: number;
-}
-
-interface WeeklyAttendanceData {
-  week: string;
-  present: number;
-  absent: number;
-  attendanceRate: number;
-}
-
-interface WeeklyFirstTimerData {
-  week: string;
-  count: number;
-}
-
 interface ShepherdStats {
   totalSheep: number;
   activeSheep: number;
@@ -65,16 +46,68 @@ interface SheepAttendance {
   streak: number;
 }
 
-function getWeekStartKey(dateStr: string): string {
-  const date = new Date(dateStr);
-  const weekStart = new Date(date);
-  weekStart.setDate(date.getDate() - date.getDay());
-  return weekStart.toISOString().split('T')[0];
+// ── Time-series bucketing (shared by all dashboard trend charts) ──
+type Granularity = 'day' | 'week' | 'month';
+
+interface PeriodBucket {
+  key: string;
+  label: string;
 }
 
-function getWeekLabel(weekStart: string): string {
-  const date = new Date(weekStart);
-  return date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+function toLocalDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Parse a 'YYYY-MM-DD' (or ISO) string as a local date so buckets align to local days.
+function parseLocalDate(dateStr: string): Date {
+  return new Date(`${dateStr.slice(0, 10)}T00:00:00`);
+}
+
+function bucketKeyFor(date: Date, g: Granularity): string {
+  if (g === 'month') {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
+  if (g === 'week') {
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay());
+    return toLocalDateKey(weekStart);
+  }
+  return toLocalDateKey(date);
+}
+
+function bucketLabelFor(key: string, g: Granularity): string {
+  if (g === 'month') {
+    const [year, month] = key.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleString('en', { month: 'short', year: '2-digit' });
+  }
+  return parseLocalDate(key).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+}
+
+// Ordered list of the most recent buckets for the chosen granularity.
+function buildBuckets(g: Granularity): PeriodBucket[] {
+  const count = g === 'day' ? 14 : g === 'week' ? 8 : 6;
+  const today = new Date();
+  const buckets: PeriodBucket[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(today);
+    if (g === 'day') d.setDate(today.getDate() - i);
+    else if (g === 'week') d.setDate(today.getDate() - today.getDay() - i * 7);
+    else d.setMonth(today.getMonth() - i, 1);
+    const key = bucketKeyFor(d, g);
+    buckets.push({ key, label: bucketLabelFor(key, g) });
+  }
+  return buckets;
+}
+
+function countByBucket(dates: string[], buckets: PeriodBucket[], g: Granularity): Record<string, number> {
+  const counts: Record<string, number> = {};
+  buckets.forEach((b) => { counts[b.key] = 0; });
+  dates.forEach((ds) => {
+    if (!ds) return;
+    const key = bucketKeyFor(parseLocalDate(ds), g);
+    if (key in counts) counts[key] += 1;
+  });
+  return counts;
 }
 
 const COLORS = ['#f97316', '#000000', '#fb923c', '#fdba74', '#fed7aa'];
@@ -90,9 +123,10 @@ export default function DashboardPage() {
     members: 0,
     flaggedMembers: 0,
   });
-  const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
-  const [weeklyAttendanceData, setWeeklyAttendanceData] = useState<WeeklyAttendanceData[]>([]);
-  const [weeklyFirstTimerData, setWeeklyFirstTimerData] = useState<WeeklyFirstTimerData[]>([]);
+  const [granularity, setGranularity] = useState<Granularity>('month');
+  const [rawNewBelieverDates, setRawNewBelieverDates] = useState<string[]>([]);
+  const [rawFirstTimerDates, setRawFirstTimerDates] = useState<string[]>([]);
+  const [rawAttendance, setRawAttendance] = useState<{ date: string; is_present: boolean }[]>([]);
   const [bacentaData, setBacentaData] = useState<{ name: string; value: number }[]>([]);
 
   // Shepherd state
@@ -178,6 +212,41 @@ export default function DashboardPage() {
     };
   }, [profile, isDemo, authLoading]);
 
+  // ── Derived trend data, re-bucketed whenever the granularity changes ──
+  const periodBuckets = useMemo(() => buildBuckets(granularity), [granularity]);
+
+  const attendanceGrowthData = useMemo(() => {
+    const present: Record<string, number> = {};
+    const absent: Record<string, number> = {};
+    periodBuckets.forEach((b) => { present[b.key] = 0; absent[b.key] = 0; });
+    rawAttendance.forEach((a) => {
+      const key = bucketKeyFor(parseLocalDate(a.date), granularity);
+      if (!(key in present)) return;
+      if (a.is_present) present[key] += 1;
+      else absent[key] += 1;
+    });
+    return periodBuckets.map((b) => {
+      const p = present[b.key];
+      const ab = absent[b.key];
+      const total = p + ab;
+      return { period: b.label, present: p, absent: ab, attendanceRate: total > 0 ? Math.round((p / total) * 100) : 0 };
+    });
+  }, [periodBuckets, granularity, rawAttendance]);
+
+  const additionsData = useMemo(() => {
+    const nb = countByBucket(rawNewBelieverDates, periodBuckets, granularity);
+    const ft = countByBucket(rawFirstTimerDates, periodBuckets, granularity);
+    return periodBuckets.map((b) => ({ period: b.label, newBelievers: nb[b.key], firstTimers: ft[b.key] }));
+  }, [periodBuckets, granularity, rawNewBelieverDates, rawFirstTimerDates]);
+
+  const firstTimerTrendData = useMemo(() => {
+    const ft = countByBucket(rawFirstTimerDates, periodBuckets, granularity);
+    return periodBuckets.map((b) => ({ period: b.label, count: ft[b.key] }));
+  }, [periodBuckets, granularity, rawFirstTimerDates]);
+
+  const periodWord = granularity === 'day' ? 'Daily' : granularity === 'week' ? 'Weekly' : 'Monthly';
+  const periodNoun = granularity === 'day' ? 'day' : granularity === 'week' ? 'week' : 'month';
+
   async function fetchBishopData() {
     const [branchesRes, alertsRes] = await Promise.all([
       supabase.from('branches').select('*').order('name'),
@@ -254,13 +323,41 @@ export default function DashboardPage() {
   }
 
   async function fetchShepherdData() {
-    const { data: sheep } = await supabase
+    // Resolve the bacentas this shepherd covers. Every member in those bacentas
+    // (plus anyone assigned directly) counts as part of the shepherd's flock.
+    const { data: shepherdBacentas, error: shepherdBacentasError } = await supabase
+      .from('shepherd_bacentas')
+      .select('bacenta:bacentas(name)')
+      .eq('branch_id', profile!.branch_id)
+      .eq('shepherd_id', profile!.id);
+
+    let bacentaNames: string[] = [];
+    if (shepherdBacentasError) {
+      // Legacy schema: a shepherd was linked to a single bacenta via profiles.bacenta_id
+      const { data: legacyProfile } = await supabase
+        .from('profiles')
+        .select('bacenta:bacentas(name)')
+        .eq('id', profile!.id)
+        .single();
+      const legacyName = (legacyProfile as { bacenta: { name: string } | null } | null)?.bacenta?.name;
+      if (legacyName) bacentaNames = [legacyName];
+    } else {
+      bacentaNames = (shepherdBacentas || [])
+        .map((row: { bacenta: { name: string } | null }) => row.bacenta?.name)
+        .filter(Boolean) as string[];
+    }
+
+    const { data: allMembers } = await supabase
       .from('members')
       .select('*')
-      .eq('assigned_shepherd', profile!.id)
+      .eq('branch_id', profile!.branch_id)
       .order('full_name');
 
-    const members: Array<{ id: string; full_name: string; photo_url: string | null; status: string; created_at: string }> = sheep || [];
+    const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null; bacenta: string }) =>
+      m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
+    );
+
+    const members: Array<{ id: string; full_name: string; photo_url: string | null; status: string; created_at: string }> = sheep;
     const active = members.filter(m => m.status === 'active').length;
     const flagged = members.filter(m => m.status === 'flagged').length;
     const inactive = members.filter(m => m.status === 'inactive').length;
@@ -324,41 +421,36 @@ export default function DashboardPage() {
       flaggedMembers: DEMO_MEMBERS.filter(m => m.status === 'flagged').length,
     });
 
-    const months: MonthlyData[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-      months.push({
-        month: key,
-        newBelievers: Math.floor(Math.random() * 5) + 1,
-        firstTimers: Math.floor(Math.random() * 4) + 1,
-        members: Math.floor(Math.random() * 3) + 2,
-      });
-    }
-    setMonthlyData(months);
+    // Spread demo additions across the last ~6 months so day/week/month views all populate.
+    const today = new Date();
+    const newBelieverDates: string[] = [];
+    const firstTimerDates: string[] = [];
+    const attendance: { date: string; is_present: boolean }[] = [];
 
-    const demoWeeklyAttendance: WeeklyAttendanceData[] = [];
-    const demoWeeklyFirstTimers: WeeklyFirstTimerData[] = [];
-    for (let i = 7; i >= 0; i--) {
-      const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay() - i * 7);
+    for (let i = 0; i < 45; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - Math.floor(Math.random() * 180));
+      newBelieverDates.push(toLocalDateKey(d));
+    }
+    for (let i = 0; i < 32; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - Math.floor(Math.random() * 180));
+      firstTimerDates.push(toLocalDateKey(d));
+    }
+    // One attendance record set per Sunday for the last 26 weeks.
+    for (let w = 0; w < 26; w++) {
+      const sunday = new Date(today);
+      sunday.setDate(today.getDate() - today.getDay() - w * 7);
+      const key = toLocalDateKey(sunday);
       const present = Math.floor(Math.random() * 30) + 25;
       const absent = Math.floor(Math.random() * 12) + 4;
-      const total = present + absent;
-      demoWeeklyAttendance.push({
-        week: getWeekLabel(weekStart.toISOString().split('T')[0]),
-        present,
-        absent,
-        attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
-      });
-      demoWeeklyFirstTimers.push({
-        week: getWeekLabel(weekStart.toISOString().split('T')[0]),
-        count: Math.floor(Math.random() * 6) + 1,
-      });
+      for (let p = 0; p < present; p++) attendance.push({ date: key, is_present: true });
+      for (let a = 0; a < absent; a++) attendance.push({ date: key, is_present: false });
     }
-    setWeeklyAttendanceData(demoWeeklyAttendance);
-    setWeeklyFirstTimerData(demoWeeklyFirstTimers);
+
+    setRawNewBelieverDates(newBelieverDates);
+    setRawFirstTimerDates(firstTimerDates);
+    setRawAttendance(attendance);
 
     const bacentaCounts: Record<string, number> = {};
     DEMO_MEMBERS.forEach(m => {
@@ -385,100 +477,21 @@ export default function DashboardPage() {
       flaggedMembers: fmRes.count || 0,
     });
 
+    // Pull raw dated rows over the last 6 months. The charts bucket this
+    // client-side into days / weeks / months based on the selected granularity.
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const startDate = sixMonthsAgo.toISOString().split('T')[0];
+    const startDate = toLocalDateKey(sixMonthsAgo);
 
-    const [nbMonthly, ftMonthly, mMonthly] = await Promise.all([
+    const [nbDatesRes, ftDatesRes, attendanceRes] = await Promise.all([
       supabase.from('new_believers').select('date_saved').eq('branch_id', branchId).gte('date_saved', startDate),
       supabase.from('first_timers').select('date_joined').eq('branch_id', branchId).gte('date_joined', startDate),
-      supabase.from('members').select('membership_date').eq('branch_id', branchId).gte('membership_date', startDate),
+      supabase.from('attendance').select('date, is_present').eq('branch_id', branchId).gte('date', startDate),
     ]);
 
-    const months: { [key: string]: MonthlyData } = {};
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-      months[key] = { month: key, newBelievers: 0, firstTimers: 0, members: 0 };
-    }
-
-    nbMonthly.data?.forEach((r: { date_saved: string }) => {
-      const d = new Date(r.date_saved);
-      const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-      if (months[key]) months[key].newBelievers++;
-    });
-
-    ftMonthly.data?.forEach((r: { date_joined: string }) => {
-      const d = new Date(r.date_joined);
-      const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-      if (months[key]) months[key].firstTimers++;
-    });
-
-    mMonthly.data?.forEach((r: { membership_date: string }) => {
-      const d = new Date(r.membership_date);
-      const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-      if (months[key]) months[key].members++;
-    });
-
-    setMonthlyData(Object.values(months));
-
-    const eightWeeksAgo = new Date();
-    eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
-    const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
-
-    const [attendanceWeeklyRes, firstTimersWeeklyRes] = await Promise.all([
-      supabase
-        .from('attendance')
-        .select('date, is_present')
-        .eq('branch_id', branchId)
-        .gte('date', weeklyStartDate),
-      supabase
-        .from('first_timers')
-        .select('date_joined')
-        .eq('branch_id', branchId)
-        .gte('date_joined', weeklyStartDate),
-    ]);
-
-    const weekSeed: Record<string, WeeklyAttendanceData> = {};
-    for (let i = 7; i >= 0; i--) {
-      const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay() - i * 7);
-      const key = weekStart.toISOString().split('T')[0];
-      weekSeed[key] = {
-        week: getWeekLabel(key),
-        present: 0,
-        absent: 0,
-        attendanceRate: 0,
-      };
-    }
-
-    attendanceWeeklyRes.data?.forEach((row: { date: string; is_present: boolean }) => {
-      const weekKey = getWeekStartKey(row.date);
-      if (!weekSeed[weekKey]) return;
-      if (row.is_present) weekSeed[weekKey].present += 1;
-      else weekSeed[weekKey].absent += 1;
-    });
-
-    const weeklyAttendance = Object.values(weekSeed).map((entry) => {
-      const total = entry.present + entry.absent;
-      return {
-        ...entry,
-        attendanceRate: total > 0 ? Math.round((entry.present / total) * 100) : 0,
-      };
-    });
-    setWeeklyAttendanceData(weeklyAttendance);
-
-    const firstTimerSeed: Record<string, WeeklyFirstTimerData> = {};
-    Object.keys(weekSeed).forEach((key) => {
-      firstTimerSeed[key] = { week: getWeekLabel(key), count: 0 };
-    });
-
-    firstTimersWeeklyRes.data?.forEach((row: { date_joined: string }) => {
-      const weekKey = getWeekStartKey(row.date_joined);
-      if (firstTimerSeed[weekKey]) firstTimerSeed[weekKey].count += 1;
-    });
-    setWeeklyFirstTimerData(Object.values(firstTimerSeed));
+    setRawNewBelieverDates((nbDatesRes.data || []).map((r: { date_saved: string }) => r.date_saved).filter(Boolean));
+    setRawFirstTimerDates((ftDatesRes.data || []).map((r: { date_joined: string }) => r.date_joined).filter(Boolean));
+    setRawAttendance((attendanceRes.data || []).map((r: { date: string; is_present: boolean }) => ({ date: r.date, is_present: r.is_present })));
 
     const { data: membersData } = await supabase
       .from('members')
@@ -1211,33 +1224,54 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Time-scale selector — controls the granularity of every trend chart below */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-black">Trends</h2>
+          <p className="text-sm text-gray-500">View the charts by day, week, or month.</p>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 self-start">
+          {([['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setGranularity(value)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                granularity === value ? 'bg-orange-500 text-white' : 'text-gray-600 hover:text-black'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Growth Line Chart */}
+        {/* Attendance growth line chart */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black mb-4">Church Growth (Last 6 Months)</h3>
+          <h3 className="text-lg font-semibold text-black">Church Growth in Attendance</h3>
+          <p className="text-sm text-gray-500 mb-4">Total people present per {periodNoun} (number of people)</p>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={monthlyData}>
+            <LineChart data={attendanceGrowthData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} />
-              <Tooltip />
-              <Line type="monotone" dataKey="newBelievers" stroke="#f97316" strokeWidth={2} name="New Believers" />
-              <Line type="monotone" dataKey="firstTimers" stroke="#000000" strokeWidth={2} name="First Timers" />
-              <Line type="monotone" dataKey="members" stroke="#fb923c" strokeWidth={2} name="Members" />
+              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'People present', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
+              <Tooltip formatter={(value) => [`${value} people`, 'Present']} />
+              <Line type="monotone" dataKey="present" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} name="People Present" />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Monthly Bar Chart */}
+        {/* Additions bar chart */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black mb-4">Monthly Additions</h3>
+          <h3 className="text-lg font-semibold text-black">{periodWord} Addition of First Timers and New Believers</h3>
+          <p className="text-sm text-gray-500 mb-4">New people added per {periodNoun} (number of people)</p>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={monthlyData}>
+            <BarChart data={additionsData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} />
-              <Tooltip />
+              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'People added', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
+              <Tooltip formatter={(value, name) => [`${value} people`, name]} />
               <Bar dataKey="newBelievers" fill="#f97316" name="New Believers" radius={[4, 4, 0, 0]} />
               <Bar dataKey="firstTimers" fill="#000000" name="First Timers" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -1245,16 +1279,17 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Weekly Trend Charts */}
+      {/* Attendance composition + first timers trend */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black mb-4">Weekly Attendance Trend (8 Weeks)</h3>
+          <h3 className="text-lg font-semibold text-black">{periodWord} Attendance (Present vs Absent)</h3>
+          <p className="text-sm text-gray-500 mb-4">Present and absent counts per {periodNoun} (number of people)</p>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={weeklyAttendanceData}>
+            <BarChart data={attendanceGrowthData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="week" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} />
-              <Tooltip />
+              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'People', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
+              <Tooltip formatter={(value, name) => [`${value} people`, name]} />
               <Bar dataKey="present" stackId="a" fill="#22c55e" name="Present" radius={[4, 4, 0, 0]} />
               <Bar dataKey="absent" stackId="a" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -1262,13 +1297,14 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black mb-4">Weekly First Timers (8 Weeks)</h3>
+          <h3 className="text-lg font-semibold text-black">{periodWord} First Timers</h3>
+          <p className="text-sm text-gray-500 mb-4">New first timers per {periodNoun} (number of people)</p>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={weeklyFirstTimerData}>
+            <LineChart data={firstTimerTrendData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="week" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} />
-              <Tooltip />
+              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'First timers', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
+              <Tooltip formatter={(value) => [`${value} people`, 'First Timers']} />
               <Line type="monotone" dataKey="count" stroke="#f97316" strokeWidth={3} dot={{ r: 4 }} name="First Timers" />
             </LineChart>
           </ResponsiveContainer>
