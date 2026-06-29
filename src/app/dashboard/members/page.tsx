@@ -38,7 +38,10 @@ export default function MembersPage() {
           shepherd_name: m.assigned_shepherd ? DEMO_USERS[m.assigned_shepherd]?.name || 'Unknown' : undefined,
         }));
         if (profile.role === 'shepherd') {
-          setMembers(withNames.filter(m => m.assigned_shepherd === profile.id));
+          const bacentaNames = (profile.bacentas || []).map((b) => b.name).filter(Boolean);
+          setMembers(withNames.filter(m =>
+            m.assigned_shepherd === profile.id || bacentaNames.includes(m.bacenta)
+          ));
         } else {
           setMembers(withNames);
         }
@@ -63,13 +66,18 @@ export default function MembersPage() {
       })) as MemberWithShepherd[];
       setMembers(membersWithNames);
     } else {
+      // Shepherd's flock = members assigned directly to them OR sitting in one of
+      // their assigned bacentas (profile.bacentas is hydrated by AuthProvider).
+      const bacentaNames = (profile!.bacentas || []).map((b) => b.name).filter(Boolean);
       const { data } = await supabase
         .from('members')
         .select('*')
         .eq('branch_id', profile!.branch_id)
-        .eq('assigned_shepherd', profile!.id)
         .order('created_at', { ascending: false });
-      setMembers(data || []);
+      const flock = (data || []).filter((m: { assigned_shepherd: string | null; bacenta: string }) =>
+        m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
+      );
+      setMembers(flock);
     }
     setLoading(false);
   }
