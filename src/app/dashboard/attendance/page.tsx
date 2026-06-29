@@ -69,7 +69,14 @@ export default function AttendancePage() {
           }
           return { ...m, recentWeeks: weeks };
         });
-        setMembers(membersWithHistory);
+        if (profile.role === 'shepherd') {
+          const bacentaNames = (profile.bacentas || []).map((b) => b.name).filter(Boolean);
+          setMembers(membersWithHistory.filter(m =>
+            m.assigned_shepherd === profile.id || bacentaNames.includes(m.bacenta)
+          ));
+        } else {
+          setMembers(membersWithHistory);
+        }
         if (isAdmin) buildShepherdStats(membersWithHistory, demoMap);
         setLoading(false);
       } else {
@@ -132,11 +139,20 @@ export default function AttendancePage() {
   }
 
   async function fetchMembers() {
-    let query = supabase.from('members').select('*').eq('branch_id', profile!.branch_id).order('full_name');
-    if (profile!.role === 'shepherd') query = query.eq('assigned_shepherd', profile!.id);
+    const { data } = await supabase
+      .from('members')
+      .select('*')
+      .eq('branch_id', profile!.branch_id)
+      .order('full_name');
+    let membersList: Member[] = data || [];
 
-    const { data } = await query;
-    const membersList = data || [];
+    // Shepherd's flock = members assigned directly OR sitting in one of their bacentas.
+    if (profile!.role === 'shepherd') {
+      const bacentaNames = (profile!.bacentas || []).map((b) => b.name).filter(Boolean);
+      membersList = membersList.filter((m: Member) =>
+        m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
+      );
+    }
 
     let namesMap: Record<string, string> = shepherdNameMap;
     if (isAdmin) {
