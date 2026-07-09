@@ -509,7 +509,7 @@ export default function AttendancePage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-black">Shepherd&apos;s Data</h1>
-          <p className="text-gray-500 mt-1">Mark weekly attendance for your sheep</p>
+          <p className="text-gray-500 mt-1">Weekly attendance overview for your sheep</p>
         </div>
         <div className="flex items-center gap-3">
           <input
@@ -518,14 +518,6 @@ export default function AttendancePage() {
             onChange={e => setDate(e.target.value)}
             className="px-4 py-2.5 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
           />
-          <button
-            onClick={handleSave}
-            disabled={saving || members.length === 0}
-            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
-          >
-            <Save size={18} />
-            {saving ? 'Saving...' : 'Save'}
-          </button>
         </div>
       </div>
 
@@ -592,8 +584,7 @@ export default function AttendancePage() {
               return (
                 <div
                   key={member.id}
-                  onClick={() => toggleAttendance(member.id)}
-                  className={`relative flex flex-col items-center p-2 rounded-lg border ${bgColor} cursor-pointer hover:shadow-sm transition min-w-13`}
+                  className={`relative flex flex-col items-center p-2 rounded-lg border ${bgColor} transition min-w-13`}
                 >
                   {todayMarked !== undefined && (
                     <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
@@ -662,8 +653,7 @@ export default function AttendancePage() {
             return (
               <div
                 key={member.id}
-                onClick={() => toggleAttendance(member.id)}
-                className={`flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-gray-50 transition cursor-pointer active:bg-orange-50 border-l-4 ${borderAccent}`}
+                className={`flex items-center justify-between px-4 sm:px-6 py-4 transition border-l-4 ${borderAccent}`}
               >
                 <div className="flex items-center gap-3 sm:gap-4">
                   <div className="w-10 h-10 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
@@ -689,8 +679,7 @@ export default function AttendancePage() {
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={e => { e.stopPropagation(); toggleAttendance(member.id); }}
+                <div
                   className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold transition ${
                     attendance[member.id]
                       ? 'bg-green-100 text-green-600 border-2 border-green-300'
@@ -698,7 +687,7 @@ export default function AttendancePage() {
                   }`}
                 >
                   {attendance[member.id] ? '✓' : '✗'}
-                </button>
+                </div>
               </div>
             );
           })}

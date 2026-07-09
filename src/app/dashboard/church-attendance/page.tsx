@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -214,7 +214,15 @@ export default function ChurchAttendancePage() {
   async function bulkSetAttendance(value: boolean | null) {
     if (!selectedSunday || trackerMembers.length === 0) return;
     await Promise.all(
-      filteredTrackerMembers.map((m) => toggleAttendance(m.id, selectedSunday, value))
+      filteredTrackerMembers.map((m) => {
+        if (value === true) {
+          const current = (attendanceMap[m.id] || {})[selectedSunday];
+          const nextVal = current === true ? true : false;
+          return toggleAttendance(m.id, selectedSunday, nextVal);
+        } else {
+          return toggleAttendance(m.id, selectedSunday, value);
+        }
+      })
     );
   }
 
@@ -679,10 +687,10 @@ export default function ChurchAttendancePage() {
             ))}
             <button
               onClick={() => bulkSetAttendance(true)}
-              className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 transition"
+              className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition"
               disabled={!selectedSunday || filteredTrackerMembers.length === 0}
             >
-              Mark Visible Present
+              Mark Visible Absent
             </button>
             <button
               onClick={() => bulkSetAttendance(null)}
