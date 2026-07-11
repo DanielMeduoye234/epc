@@ -103,6 +103,7 @@ export default function ChurchAttendancePage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'unmarked' | 'absent' | 'present'>('all');
   const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, boolean>>>({});
   const [loadingAtt, setLoadingAtt] = useState(false);
+  const [attendanceError, setAttendanceError] = useState('');
   const [showSundayRecords, setShowSundayRecords] = useState(false);
 
   useEffect(() => { if (profile) fetchData(); }, [profile]);
@@ -195,34 +196,51 @@ export default function ChurchAttendancePage() {
       : current === true
       ? false
       : undefined;
+    setAttendanceError('');
     setAttendanceMap(prev => {
       const updated = { ...prev, [memberId]: { ...(prev[memberId] || {}) } };
       if (newVal === undefined) delete updated[memberId][dateStr];
       else updated[memberId][dateStr] = newVal;
       return updated;
     });
-    if (newVal === undefined) {
-      await supabase.from('attendance').delete().eq('person_id', memberId).eq('date', dateStr);
-    } else {
-      await supabase.from('attendance').upsert(
-        { person_id: memberId, date: dateStr, is_present: newVal, branch_id: profile!.branch_id },
-        { onConflict: 'person_id,date' }
-      );
+
+    const { error } = newVal === undefined
+      ? await supabase
+          .from('attendance')
+          .delete()
+          .eq('person_id', memberId)
+          .eq('person_type', 'member')
+          .eq('date', dateStr)
+          .eq('branch_id', profile!.branch_id)
+      : await supabase.from('attendance').upsert(
+          {
+            person_id: memberId,
+            person_type: 'member',
+            date: dateStr,
+            is_present: newVal,
+            marked_by: profile!.id,
+            branch_id: profile!.branch_id,
+          },
+          { onConflict: 'person_id,date,person_type' }
+        );
+
+    if (error) {
+      setAttendanceMap(prev => {
+        const updated = { ...prev, [memberId]: { ...(prev[memberId] || {}) } };
+        if (current === undefined) delete updated[memberId][dateStr];
+        else updated[memberId][dateStr] = current;
+        return updated;
+      });
+      setAttendanceError(`Attendance was not saved: ${error.message}`);
+      return false;
     }
+    return true;
   }
 
   async function bulkSetAttendance(value: boolean | null) {
     if (!selectedSunday || trackerMembers.length === 0) return;
     await Promise.all(
-      filteredTrackerMembers.map((m) => {
-        if (value === true) {
-          const current = (attendanceMap[m.id] || {})[selectedSunday];
-          const nextVal = current === true ? true : false;
-          return toggleAttendance(m.id, selectedSunday, nextVal);
-        } else {
-          return toggleAttendance(m.id, selectedSunday, value);
-        }
-      })
+      filteredTrackerMembers.map((m) => toggleAttendance(m.id, selectedSunday, value))
     );
   }
 
@@ -686,7 +704,7 @@ export default function ChurchAttendancePage() {
               </button>
             ))}
             <button
-              onClick={() => bulkSetAttendance(true)}
+              onClick={() => bulkSetAttendance(false)}
               className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition"
               disabled={!selectedSunday || filteredTrackerMembers.length === 0}
             >
@@ -700,6 +718,12 @@ export default function ChurchAttendancePage() {
               Clear Visible
             </button>
           </div>
+
+          {attendanceError && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {attendanceError}
+            </div>
+          )}
 
           {/* Legend */}
           <div className="flex items-center gap-4 text-xs text-gray-500">
