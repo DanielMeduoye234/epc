@@ -239,8 +239,13 @@ export default function ChurchAttendancePage() {
 
   async function bulkSetAttendance(value: boolean | null) {
     if (!selectedSunday || trackerMembers.length === 0) return;
+    const membersToUpdate = value === false
+      ? filteredTrackerMembers.filter(
+          (member) => (attendanceMap[member.id] || {})[selectedSunday] === undefined
+        )
+      : filteredTrackerMembers;
     await Promise.all(
-      filteredTrackerMembers.map((m) => toggleAttendance(m.id, selectedSunday, value))
+      membersToUpdate.map((m) => toggleAttendance(m.id, selectedSunday, value))
     );
   }
 
