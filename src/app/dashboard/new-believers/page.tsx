@@ -31,6 +31,8 @@ export default function NewBelieversPage() {
   const [editRecord, setEditRecord] = useState<NewBelieverWithRecorder | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  const [currentPage, setCurrentPage] = useState(1);
+
   useEffect(() => {
     if (profile) {
       if (isDemo) {
@@ -81,6 +83,10 @@ export default function NewBelieversPage() {
       b.who_brought.toLowerCase().includes(search.toLowerCase())
   );
 
+  const ITEMS_PER_PAGE = 10;
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedData = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
   const deletingRecord = believers.find(b => b.id === deleteId);
 
   return (
@@ -107,7 +113,10 @@ export default function NewBelieversPage() {
           type="text"
           placeholder="Search by name, bacenta, or who brought them..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setCurrentPage(1);
+          }}
           className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
         />
       </div>
@@ -134,7 +143,7 @@ export default function NewBelieversPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((believer) => (
+                {paginatedData.map((believer) => (
                   <tr key={believer.id} className="hover:bg-orange-50/50 transition">
                     <td className="px-6 py-4">
                       <Link href={`/dashboard/profile/new-believer/${believer.id}`} className="flex items-center gap-3">
@@ -208,6 +217,48 @@ export default function NewBelieversPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls */}
+          {filtered.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+              <div className="text-sm text-gray-500">
+                Showing <span className="font-semibold text-black">{Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filtered.length)}</span> to{' '}
+                <span className="font-semibold text-black">{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}</span> of{' '}
+                <span className="font-semibold text-black">{filtered.length}</span> entries
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  Previous
+                </button>
+                <div className="hidden sm:flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                        currentPage === page
+                          ? 'bg-orange-500 text-white'
+                          : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

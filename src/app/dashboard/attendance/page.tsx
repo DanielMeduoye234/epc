@@ -4,8 +4,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Member } from '@/lib/types';
-import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
+import { Member, FirstTimer, NewBeliever } from '@/lib/types';
+import { DEMO_MEMBERS, DEMO_FIRST_TIMERS, DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
 import Link from 'next/link';
 import {
   CalendarCheck, Save, Eye, BarChart3, Users, TrendingUp, TrendingDown,
@@ -15,6 +15,7 @@ import React from 'react';
 
 interface MemberWithHistory extends Member {
   recentWeeks?: boolean[];
+  person_type: 'member' | 'first_timer' | 'new_believer';
 }
 
 interface ShepherdStats {
@@ -26,6 +27,97 @@ interface ShepherdStats {
   lost: number;
   avgAttendance: number;
   weeklyRates: number[];
+}
+
+async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
+  // 1. Get all active first_timers and new_believers in this branch
+  const [ftRes, nbRes] = await Promise.all([
+    supabase.from('first_timers').select('*').eq('branch_id', branchId).eq('status', 'first_timer'),
+    supabase.from('new_believers').select('*').eq('branch_id', branchId)
+  ]);
+
+  const firstTimers: FirstTimer[] = ftRes.data || [];
+  const newBelievers: NewBeliever[] = nbRes.data || [];
+
+  if (firstTimers.length === 0 && newBelievers.length === 0) return;
+
+  // Get current members to avoid duplicates
+  const { data: currentMembers } = await supabase.from('members').select('full_name, phone_number, first_timer_id').eq('branch_id', branchId);
+  const existingFtIds = new Set((currentMembers || []).map((m: any) => m.first_timer_id).filter(Boolean));
+  const existingNames = new Set((currentMembers || []).map((m: any) => m.full_name.toLowerCase().trim()));
+  const existingPhones = new Set((currentMembers || []).map((m: any) => m.phone_number.trim()).filter(Boolean));
+
+  // 2. Fetch present attendance counts for first timers
+  if (firstTimers.length > 0) {
+    const ftIds = firstTimers.map(f => f.id);
+    const { data: ftAtt } = await supabase
+      .from('attendance')
+      .select('person_id')
+      .in('person_id', ftIds)
+      .eq('is_present', true);
+
+    const ftCounts: Record<string, number> = {};
+    (ftAtt || []).forEach((a: any) => {
+      ftCounts[a.person_id] = (ftCounts[a.person_id] || 0) + 1;
+    });
+
+    for (const ft of firstTimers) {
+      const count = ftCounts[ft.id] || 0;
+      if (count >= 2 && !existingFtIds.has(ft.id) && !existingNames.has(ft.full_name.toLowerCase().trim())) {
+        await supabase.from('members').insert({
+          first_timer_id: ft.id,
+          full_name: ft.full_name,
+          first_name: ft.first_name,
+          last_name: ft.last_name,
+          nickname: ft.nickname,
+          address: ft.address,
+          bacenta: ft.bacenta,
+          phone_number: ft.phone_number,
+          who_brought: ft.who_brought,
+          date_joined: ft.date_joined,
+          membership_date: new Date().toISOString().split('T')[0],
+          assigned_shepherd: ft.assigned_shepherd,
+          branch_id: ft.branch_id,
+          status: 'active'
+        });
+        await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+      }
+    }
+  }
+
+  // 3. Fetch present attendance counts for new believers
+  if (newBelievers.length > 0) {
+    const nbIds = newBelievers.map(n => n.id);
+    const { data: nbAtt } = await supabase
+      .from('attendance')
+      .select('person_id')
+      .in('person_id', nbIds)
+      .eq('is_present', true);
+
+    const nbCounts: Record<string, number> = {};
+    (nbAtt || []).forEach((a: any) => {
+      nbCounts[a.person_id] = (nbCounts[a.person_id] || 0) + 1;
+    });
+
+    for (const nb of newBelievers) {
+      const count = nbCounts[nb.id] || 0;
+      const isAlreadyMember = existingNames.has(nb.full_name.toLowerCase().trim()) || (nb.phone_number && existingPhones.has(nb.phone_number.trim()));
+      if (count >= 2 && !isAlreadyMember) {
+        await supabase.from('members').insert({
+          full_name: nb.full_name,
+          address: nb.address,
+          bacenta: nb.bacenta,
+          phone_number: nb.phone_number,
+          who_brought: nb.who_brought,
+          date_joined: nb.date_saved,
+          membership_date: new Date().toISOString().split('T')[0],
+          assigned_shepherd: nb.recorded_by,
+          branch_id: nb.branch_id,
+          status: 'active'
+        });
+      }
+    }
+  }
 }
 
 export default function AttendancePage() {
@@ -43,7 +135,6 @@ export default function AttendancePage() {
   const [expandedShepherd, setExpandedShepherd] = useState<string | null>(null);
   const [selectedShepherdId, setSelectedShepherdId] = useState('');
 
-  // Search/filter state (shepherd view)
   const [search, setSearch] = useState('');
   const [bacentaFilter, setBacentaFilter] = useState('all');
 
@@ -60,15 +151,30 @@ export default function AttendancePage() {
           });
         setShepherdNameMap(demoMap);
 
-        const membersWithHistory: MemberWithHistory[] = DEMO_MEMBERS.map(m => {
+        const listMembers: MemberWithHistory[] = DEMO_MEMBERS.map(m => ({ ...m, person_type: 'member' }));
+        const listFirstTimers: MemberWithHistory[] = DEMO_FIRST_TIMERS.filter(ft => ft.status === 'first_timer').map(ft => ({
+          ...ft,
+          person_type: 'first_timer',
+          status: 'active'
+        })) as any;
+        const listNewBelievers: MemberWithHistory[] = DEMO_NEW_BELIEVERS.map(nb => ({
+          ...nb,
+          person_type: 'new_believer',
+          date_joined: nb.date_saved,
+          assigned_shepherd: nb.recorded_by,
+          status: 'active'
+        })) as any;
+
+        const combined = [...listMembers, ...listFirstTimers, ...listNewBelievers];
+
+        const membersWithHistory: MemberWithHistory[] = combined.map(m => {
           const weeks: boolean[] = [];
           for (let i = 0; i < 6; i++) {
-            if (m.status === 'active') weeks.push(Math.random() > 0.2);
-            else if (m.status === 'flagged') weeks.push(Math.random() > 0.7);
-            else weeks.push(Math.random() > 0.85);
+            weeks.push(Math.random() > 0.25);
           }
           return { ...m, recentWeeks: weeks };
         });
+
         if (profile.role === 'shepherd') {
           const bacentaNames = (profile.bacentas || []).map((b) => b.name).filter(Boolean);
           setMembers(membersWithHistory.filter(m =>
@@ -98,37 +204,22 @@ export default function AttendancePage() {
     });
 
     const stats: ShepherdStats[] = Object.entries(shepherdMap).map(([sid, sheep]) => {
-      const sourceNames = namesMap || shepherdNameMap;
-      const name = sid === 'unassigned'
-        ? 'Unassigned'
-        : sourceNames[sid] || (isDemo ? DEMO_USERS[sid]?.name || sid : sid);
-      let faithful = 0, atRisk = 0, lost = 0;
-      const weekTotals = [0, 0, 0, 0, 0, 0];
-      const weekCounts = [0, 0, 0, 0, 0, 0];
+      const faithful = sheep.filter(s => (s.recentWeeks || []).filter(Boolean).length >= 4).length;
+      const lost = sheep.filter(s => (s.recentWeeks || []).filter(Boolean).length === 0).length;
+      const atRisk = sheep.length - faithful - lost;
+      const totalAttendances = sheep.reduce((acc, s) => acc + (s.recentWeeks || []).filter(Boolean).length, 0);
+      const possibleAttendances = sheep.length * 6;
+      const avgAttendance = possibleAttendances > 0 ? Math.round((totalAttendances / possibleAttendances) * 100) : 0;
 
-      sheep.forEach(s => {
-        const rate = s.recentWeeks ? s.recentWeeks.filter(Boolean).length / s.recentWeeks.length : 0;
-        if (rate >= 0.7) faithful++;
-        else if (rate >= 0.3) atRisk++;
-        else lost++;
+      const weeklyRates = [0, 0, 0, 0, 0, 0];
+      for (let i = 0; i < 6; i++) {
+        const presentCount = sheep.filter(s => s.recentWeeks?.[i]).length;
+        weeklyRates[i] = sheep.length > 0 ? Math.round((presentCount / sheep.length) * 100) : 0;
+      }
 
-        s.recentWeeks?.forEach((present, i) => {
-          weekCounts[i]++;
-          if (present) weekTotals[i]++;
-        });
-      });
-
-      const weeklyRates = weekTotals.map((t, i) => weekCounts[i] > 0 ? Math.round((t / weekCounts[i]) * 100) : 0);
-      const avgAttendance = sheep.length > 0
-        ? Math.round(sheep.reduce((sum, s) => {
-            const rate = s.recentWeeks ? s.recentWeeks.filter(Boolean).length / s.recentWeeks.length : 0;
-            return sum + rate;
-          }, 0) / sheep.length * 100)
-        : 0;
-
+      const name = namesMap?.[sid] || (sid === 'unassigned' ? 'Unassigned' : sid);
       return { id: sid, name, totalSheep: sheep.length, faithful, atRisk, lost, avgAttendance, weeklyRates };
     });
-
     stats.sort((a, b) => b.avgAttendance - a.avgAttendance);
     setShepherdStats(stats);
     setSelectedShepherdId((prev) => {
@@ -139,31 +230,40 @@ export default function AttendancePage() {
   }
 
   async function fetchMembers() {
-    const { data } = await supabase
-      .from('members')
-      .select('*')
-      .eq('branch_id', profile!.branch_id)
-      .order('full_name');
-    let membersList: Member[] = data || [];
+    const [mRes, ftRes, nbRes, profilesRes] = await Promise.all([
+      supabase.from('members').select('*').eq('branch_id', profile!.branch_id),
+      supabase.from('first_timers').select('*').eq('branch_id', profile!.branch_id).eq('status', 'first_timer'),
+      supabase.from('new_believers').select('*').eq('branch_id', profile!.branch_id),
+      supabase.from('profiles').select('id, full_name').eq('branch_id', profile!.branch_id)
+    ]);
 
-    // Shepherd's flock = members assigned directly OR sitting in one of their bacentas.
+    const mList: MemberWithHistory[] = (mRes.data || []).map((x: any) => ({ ...x, person_type: 'member' }));
+    const ftList: MemberWithHistory[] = (ftRes.data || []).map((x: any) => ({
+      ...x,
+      person_type: 'first_timer',
+      status: 'active'
+    })) as any;
+    const nbList: MemberWithHistory[] = (nbRes.data || []).map((x: any) => ({
+      ...x,
+      person_type: 'new_believer',
+      date_joined: x.date_saved,
+      assigned_shepherd: x.recorded_by,
+      status: 'active'
+    })) as any;
+
+    let membersList = [...mList, ...ftList, ...nbList];
+
     if (profile!.role === 'shepherd') {
       const bacentaNames = (profile!.bacentas || []).map((b) => b.name).filter(Boolean);
-      membersList = membersList.filter((m: Member) =>
+      membersList = membersList.filter((m: MemberWithHistory) =>
         m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
       );
     }
 
     let namesMap: Record<string, string> = shepherdNameMap;
     if (isAdmin) {
-      const { data: shepherdProfiles } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('branch_id', profile!.branch_id)
-        .eq('role', 'shepherd');
-
       namesMap = {};
-      (shepherdProfiles || []).forEach((sp: { id: string; full_name: string }) => {
+      (profilesRes.data || []).forEach((sp: { id: string; full_name: string }) => {
         namesMap[sp.id] = sp.full_name;
       });
       setShepherdNameMap(namesMap);
@@ -171,7 +271,7 @@ export default function AttendancePage() {
 
     const sixWeeksAgo = new Date();
     sixWeeksAgo.setDate(sixWeeksAgo.getDate() - 42);
-    const memberIds = membersList.map((m: Member) => m.id);
+    const memberIds = membersList.map((m: MemberWithHistory) => m.id);
 
     if (memberIds.length > 0) {
       const { data: historyData } = await supabase
@@ -193,7 +293,7 @@ export default function AttendancePage() {
         }
       });
 
-      const membersWithHistory: MemberWithHistory[] = membersList.map((m: Member) => {
+      const membersWithHistory: MemberWithHistory[] = membersList.map((m: MemberWithHistory) => {
         const weeks = Array.from(weekMap[m.id].values()).slice(-6);
         return { ...m, recentWeeks: weeks };
       });
@@ -223,8 +323,8 @@ export default function AttendancePage() {
       .eq('date', date);
 
     const existing: Record<string, boolean> = {};
-    data?.forEach((a: { person_id: string; is_present: boolean }) => {
-      existing[a.person_id] = a.is_present;
+    (data || []).forEach((row: { person_id: string; is_present: boolean }) => {
+      existing[row.person_id] = row.is_present;
     });
     setAttendance(existing);
   }
@@ -244,7 +344,7 @@ export default function AttendancePage() {
     const { error: insError } = await supabase.from('attendance').insert(
       members.map(m => ({
         person_id: m.id,
-        person_type: 'member' as const,
+        person_type: m.person_type,
         date,
         is_present: attendance[m.id] ?? false,
         marked_by: profile!.id,
@@ -254,6 +354,9 @@ export default function AttendancePage() {
     setSaving(false);
     if (!insError) {
       setSaved(true);
+      if (!isDemo) {
+        await checkAndPromoteIndividuals(supabase, profile!.branch_id);
+      }
       setTimeout(() => setSaved(false), 3000);
     } else {
       setSaveError(true);

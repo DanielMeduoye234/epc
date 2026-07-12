@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Member, Bacenta } from '@/lib/types';
+import { Member, Bacenta, FirstTimer, NewBeliever } from '@/lib/types';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
 } from 'recharts';
@@ -13,6 +13,93 @@ import {
 } from 'lucide-react';
 import React from 'react';
 import BacentaSelect from '@/components/BacentaSelect';
+
+async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
+  const [ftRes, nbRes] = await Promise.all([
+    supabase.from('first_timers').select('*').eq('branch_id', branchId).eq('status', 'first_timer'),
+    supabase.from('new_believers').select('*').eq('branch_id', branchId)
+  ]);
+
+  const firstTimers: FirstTimer[] = ftRes.data || [];
+  const newBelievers: NewBeliever[] = nbRes.data || [];
+
+  if (firstTimers.length === 0 && newBelievers.length === 0) return;
+
+  const { data: currentMembers } = await supabase.from('members').select('full_name, phone_number, first_timer_id').eq('branch_id', branchId);
+  const existingFtIds = new Set((currentMembers || []).map((m: any) => m.first_timer_id).filter(Boolean));
+  const existingNames = new Set((currentMembers || []).map((m: any) => m.full_name.toLowerCase().trim()));
+  const existingPhones = new Set((currentMembers || []).map((m: any) => m.phone_number.trim()).filter(Boolean));
+
+  if (firstTimers.length > 0) {
+    const ftIds = firstTimers.map(f => f.id);
+    const { data: ftAtt } = await supabase
+      .from('attendance')
+      .select('person_id')
+      .in('person_id', ftIds)
+      .eq('is_present', true);
+
+    const ftCounts: Record<string, number> = {};
+    (ftAtt || []).forEach((a: any) => {
+      ftCounts[a.person_id] = (ftCounts[a.person_id] || 0) + 1;
+    });
+
+    for (const ft of firstTimers) {
+      const count = ftCounts[ft.id] || 0;
+      if (count >= 2 && !existingFtIds.has(ft.id) && !existingNames.has(ft.full_name.toLowerCase().trim())) {
+        await supabase.from('members').insert({
+          first_timer_id: ft.id,
+          full_name: ft.full_name,
+          first_name: ft.first_name,
+          last_name: ft.last_name,
+          nickname: ft.nickname,
+          address: ft.address,
+          bacenta: ft.bacenta,
+          phone_number: ft.phone_number,
+          who_brought: ft.who_brought,
+          date_joined: ft.date_joined,
+          membership_date: new Date().toISOString().split('T')[0],
+          assigned_shepherd: ft.assigned_shepherd,
+          branch_id: ft.branch_id,
+          status: 'active'
+        });
+        await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+      }
+    }
+  }
+
+  if (newBelievers.length > 0) {
+    const nbIds = newBelievers.map(n => n.id);
+    const { data: nbAtt } = await supabase
+      .from('attendance')
+      .select('person_id')
+      .in('person_id', nbIds)
+      .eq('is_present', true);
+
+    const nbCounts: Record<string, number> = {};
+    (nbAtt || []).forEach((a: any) => {
+      nbCounts[a.person_id] = (nbCounts[a.person_id] || 0) + 1;
+    });
+
+    for (const nb of newBelievers) {
+      const count = nbCounts[nb.id] || 0;
+      const isAlreadyMember = existingNames.has(nb.full_name.toLowerCase().trim()) || (nb.phone_number && existingPhones.has(nb.phone_number.trim()));
+      if (count >= 2 && !isAlreadyMember) {
+        await supabase.from('members').insert({
+          full_name: nb.full_name,
+          address: nb.address,
+          bacenta: nb.bacenta,
+          phone_number: nb.phone_number,
+          who_brought: nb.who_brought,
+          date_joined: nb.date_saved,
+          membership_date: new Date().toISOString().split('T')[0],
+          assigned_shepherd: nb.recorded_by,
+          branch_id: nb.branch_id,
+          status: 'active'
+        });
+      }
+    }
+  }
+}
 
 function getSundaysFromMonth(year: number, month: number): Date[] {
   const sundays: Date[] = [];
