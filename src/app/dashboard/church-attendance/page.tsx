@@ -205,13 +205,20 @@ export default function ChurchAttendancePage() {
     eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
     const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
 
-    const [mRes, bRes, attendanceRes, firstTimersRes] = await Promise.all([
+    const [mRes, ftRes, nbRes, bRes, attendanceRes, firstTimersRes] = await Promise.all([
       supabase.from('members').select('*').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
+      supabase.from('first_timers').select('*').eq('branch_id', profile!.branch_id).eq('status', 'first_timer').order('bacenta').order('full_name'),
+      supabase.from('new_believers').select('*').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
       supabase.from('bacentas').select('*').eq('branch_id', profile!.branch_id).order('name'),
       supabase.from('attendance').select('date, is_present').eq('branch_id', profile!.branch_id).gte('date', weeklyStartDate),
       supabase.from('first_timers').select('date_joined').eq('branch_id', profile!.branch_id).gte('date_joined', weeklyStartDate),
     ]);
-    setMembers(mRes.data || []);
+
+    const mList = (mRes.data || []).map((x: any) => ({ ...x, person_type: 'member' }));
+    const ftList = (ftRes.data || []).map((x: any) => ({ ...x, person_type: 'first_timer', status: 'active' }));
+    const nbList = (nbRes.data || []).map((x: any) => ({ ...x, person_type: 'new_believer', date_joined: x.date_saved, status: 'active' }));
+
+    setMembers([...mList, ...ftList, ...nbList] as any);
     setBacentas(bRes.data || []);
 
     const weekSeed: Record<string, WeeklyAttendancePoint> = {};
@@ -259,7 +266,7 @@ export default function ChurchAttendancePage() {
     const { data } = await supabase
       .from('attendance')
       .select('person_id, date, is_present')
-      .in('person_id', members.map(m => m.id))
+      .in('person_id', members.map((m: any) => m.id))
       .gte('date', startDate)
       .lte('date', endDate);
 
@@ -291,18 +298,21 @@ export default function ChurchAttendancePage() {
       return updated;
     });
 
+    const targetMember = members.find(m => m.id === memberId);
+    const personType = (targetMember as any)?.person_type || 'member';
+
     const { error } = newVal === undefined
       ? await supabase
           .from('attendance')
           .delete()
           .eq('person_id', memberId)
-          .eq('person_type', 'member')
+          .eq('person_type', personType)
           .eq('date', dateStr)
           .eq('branch_id', profile!.branch_id)
       : await supabase.from('attendance').upsert(
           {
             person_id: memberId,
-            person_type: 'member',
+            person_type: personType,
             date: dateStr,
             is_present: newVal,
             marked_by: profile!.id,
@@ -310,6 +320,11 @@ export default function ChurchAttendancePage() {
           },
           { onConflict: 'person_id,date,person_type' }
         );
+
+    if (!error && newVal === true) {
+      await checkAndPromoteIndividuals(supabase, profile!.branch_id);
+      fetchData();
+    }
 
     if (error) {
       setAttendanceMap(prev => {
