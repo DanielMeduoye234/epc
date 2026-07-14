@@ -8,6 +8,7 @@ import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
 import { Search, Users, Plus, X, Lock, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
+import Pagination from '@/components/Pagination';
 
 interface MemberWithShepherd extends Member {
   shepherd_name?: string;
@@ -55,15 +56,39 @@ export default function RegularMembersPage() {
 
   async function fetchMembers() {
     if (profile!.role === 'super_admin' || profile!.role === 'bishop' || profile!.role === 'shepherd') {
-      const { data } = await supabase
-        .from('members')
-        .select('*, shepherd:profiles!members_assigned_shepherd_fkey(full_name)')
-        .eq('branch_id', profile!.branch_id)
-        .order('created_at', { ascending: false });
+      const [{ data }, shepherdBacentasRes, bacentasLeaderRes] = await Promise.all([
+        supabase
+          .from('members')
+          .select('*, shepherd:profiles!members_assigned_shepherd_fkey(full_name)')
+          .eq('branch_id', profile!.branch_id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('shepherd_bacentas')
+          .select('shepherd:profiles(full_name), bacenta:bacentas(name)')
+          .eq('branch_id', profile!.branch_id),
+        supabase
+          .from('bacentas')
+          .select('name, leader_name')
+          .eq('branch_id', profile!.branch_id),
+      ]);
+
+      // Members without a direct shepherd inherit the one assigned to their bacenta
+      const bacentaShepherdMap: Record<string, string> = {};
+      (bacentasLeaderRes.data || []).forEach((b: { name: string; leader_name: string | null }) => {
+        if (b.leader_name) bacentaShepherdMap[b.name] = b.leader_name;
+      });
+      (shepherdBacentasRes.data || []).forEach((row: { shepherd: { full_name: string } | null; bacenta: { name: string } | null }) => {
+        if (row.bacenta?.name && row.shepherd?.full_name) {
+          bacentaShepherdMap[row.bacenta.name] = row.shepherd.full_name;
+        }
+      });
 
       const membersWithNames: MemberWithShepherd[] = (data || []).map((m: Record<string, unknown>) => ({
         ...m,
-        shepherd_name: (m.shepherd as { full_name: string } | null)?.full_name || undefined,
+        shepherd_name:
+          (m.shepherd as { full_name: string } | null)?.full_name ||
+          bacentaShepherdMap[m.bacenta as string] ||
+          undefined,
       })) as MemberWithShepherd[];
 
       if (profile!.role === 'shepherd') {
@@ -425,46 +450,13 @@ export default function RegularMembersPage() {
           </div>
 
           {/* Pagination Controls */}
-          {filtered.length > 0 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 border border-gray-100 rounded-xl bg-gray-50/50 mt-4 bg-white shadow-sm">
-              <div className="text-sm text-gray-500">
-                Showing <span className="font-semibold text-black">{Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filtered.length)}</span> to{' '}
-                <span className="font-semibold text-black">{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}</span> of{' '}
-                <span className="font-semibold text-black">{filtered.length}</span> entries
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                >
-                  Previous
-                </button>
-                <div className="hidden sm:flex items-center gap-1">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-                        currentPage === page
-                          ? 'bg-orange-500 text-white'
-                          : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
         </>
       )}
 
@@ -558,6 +550,7 @@ function EditMemberModal({
     bacenta: member.bacenta,
     who_brought: member.who_brought,
     status: member.status as MemberStatus,
+    birthday: member.birthday || '',
   });
 
   useEffect(() => {
@@ -570,7 +563,10 @@ function EditMemberModal({
     setSaving(true);
     setError(null);
     if (!isDemo) {
-      const { error: err } = await supabase.from('members').update(form).eq('id', member.id);
+      const { error: err } = await supabase
+        .from('members')
+        .update({ ...form, birthday: form.birthday || null })
+        .eq('id', member.id);
       if (err) { setError(err.message); setSaving(false); return; }
     }
     onSaved();
@@ -610,6 +606,10 @@ function EditMemberModal({
               className={`${inputCls} bg-white`}
               placeholder="Select a bacenta..."
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
+            <input type="date" value={form.birthday} onChange={e => setForm({ ...form, birthday: e.target.value })} className={inputCls} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Who Brought Them</label>

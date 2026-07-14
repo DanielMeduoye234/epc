@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { DEMO_MEMBERS, DEMO_USERS, DEMO_FIRST_TIMERS } from '@/lib/demo-data';
-import { Users, TrendingUp, TrendingDown, Eye, Phone, MapPin, Calendar, ChevronDown, ChevronUp, Award, AlertTriangle } from 'lucide-react';
+import { Users, TrendingUp, TrendingDown, Eye, Phone, MapPin, Calendar, ChevronDown, ChevronUp, Award, AlertTriangle, Trash2, X } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -51,6 +51,12 @@ export default function ShepherdsPage() {
   const [shepherds, setShepherds] = useState<ShepherdProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deletingShepherd, setDeletingShepherd] = useState<ShepherdProfile | null>(null);
+  const [reassignTo, setReassignTo] = useState<string>('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const canManageShepherds = profile?.role === 'super_admin' || profile?.role === 'bishop';
 
   useEffect(() => {
     if (profile) {
@@ -292,6 +298,44 @@ export default function ShepherdsPage() {
     setLoading(false);
   }
 
+  async function handleDeleteShepherd() {
+    if (!deletingShepherd) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+
+    if (isDemo) {
+      setShepherds((prev) => prev.filter((s) => s.id !== deletingShepherd.id));
+      setDeletingShepherd(null);
+      setReassignTo('');
+      setDeleteBusy(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/delete-shepherd', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shepherd_id: deletingShepherd.id,
+          reassign_to: reassignTo || null,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setDeleteError(result.error || 'Failed to delete shepherd');
+        setDeleteBusy(false);
+        return;
+      }
+      setDeletingShepherd(null);
+      setReassignTo('');
+      setDeleteBusy(false);
+      fetchShepherdData();
+    } catch {
+      setDeleteError('Network error — please try again');
+      setDeleteBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -420,6 +464,20 @@ export default function ShepherdsPage() {
                     )}
                   </div>
 
+                  {canManageShepherds && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingShepherd(shepherd);
+                        setReassignTo('');
+                        setDeleteError(null);
+                      }}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                      title="Delete shepherd"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                   {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
                 </div>
               </div>
@@ -560,6 +618,67 @@ export default function ShepherdsPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Shepherd + Reassign Modal */}
+      {deletingShepherd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => !deleteBusy && setDeletingShepherd(null)} />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-black">Delete Shepherd</h2>
+              <button onClick={() => setDeletingShepherd(null)} className="text-gray-400 hover:text-black" disabled={deleteBusy}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {deleteError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {deleteError}
+                </div>
+              )}
+              <p className="text-sm text-gray-600">
+                You are about to delete <strong className="text-black">{deletingShepherd.name}</strong>.
+                {deletingShepherd.totalSheep > 0 ? (
+                  <> They currently have <strong className="text-black">{deletingShepherd.totalSheep} member{deletingShepherd.totalSheep === 1 ? '' : 's'}</strong> under their care. Choose another shepherd to take over their members and bacentas, or leave them unassigned.</>
+                ) : (
+                  <> They have no members assigned. This action cannot be undone.</>
+                )}
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reassign members &amp; bacentas to</label>
+                <select
+                  value={reassignTo}
+                  onChange={(e) => setReassignTo(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black bg-white"
+                >
+                  <option value="">Leave unassigned</option>
+                  {shepherds
+                    .filter((s) => s.id !== deletingShepherd.id)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setDeletingShepherd(null)}
+                  disabled={deleteBusy}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition font-medium disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteShepherd}
+                  disabled={deleteBusy}
+                  className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-medium disabled:opacity-50"
+                >
+                  {deleteBusy ? 'Deleting...' : 'Delete Shepherd'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

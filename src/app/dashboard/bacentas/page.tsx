@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Plus, X, Trash2, Edit2, Users, FolderTree, ChevronDown, Search, Check } from 'lucide-react';
+import { Plus, X, Trash2, Edit2, Users, FolderTree, ChevronDown, Search, Check, MapPin, User } from 'lucide-react';
+import Link from 'next/link';
+import { DEMO_MEMBERS } from '@/lib/demo-data';
 
 interface Bacenta {
   id: string;
@@ -38,6 +40,7 @@ export default function BacentasPage() {
   const [form, setForm] = useState({ name: '', leader_name: '', location: '', shepherd_ids: [] as string[] });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [profileBacenta, setProfileBacenta] = useState<Bacenta | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -281,6 +284,24 @@ export default function BacentasPage() {
         </button>
       </div>
 
+      {/* Summary Stats */}
+      {!loading && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <p className="text-[10px] text-gray-500 uppercase">Total Bacentas</p>
+            <p className="text-2xl font-bold text-orange-600">{bacentas.length}</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <p className="text-[10px] text-gray-500 uppercase">Total Members</p>
+            <p className="text-2xl font-bold text-black">{bacentas.reduce((sum, b) => sum + (b.member_count || 0), 0)}</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 col-span-2 sm:col-span-1">
+            <p className="text-[10px] text-gray-500 uppercase">With Shepherd</p>
+            <p className="text-2xl font-bold text-green-600">{bacentas.filter((b) => (b.shepherds || []).length > 0).length}</p>
+          </div>
+        </div>
+      )}
+
       {/* Bacenta Cards */}
       {loading ? (
         <div className="flex justify-center py-12">
@@ -289,7 +310,11 @@ export default function BacentasPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {bacentas.map((bacenta) => (
-            <div key={bacenta.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
+            <div
+              key={bacenta.id}
+              onClick={() => setProfileBacenta(bacenta)}
+              className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition cursor-pointer"
+            >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
@@ -307,13 +332,13 @@ export default function BacentasPage() {
                 </div>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => startEdit(bacenta)}
+                    onClick={(e) => { e.stopPropagation(); startEdit(bacenta); }}
                     className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-md transition"
                   >
                     <Edit2 size={14} />
                   </button>
                   <button
-                    onClick={() => handleDelete(bacenta.id)}
+                    onClick={(e) => { e.stopPropagation(); handleDelete(bacenta.id); }}
                     className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition"
                   >
                     <Trash2 size={14} />
@@ -423,6 +448,188 @@ export default function BacentasPage() {
           </div>
         </div>
       )}
+
+      {/* Bacenta Profile Modal */}
+      {profileBacenta && (
+        <BacentaProfileModal
+          bacenta={profileBacenta}
+          branchId={profile!.branch_id}
+          isDemo={isDemo}
+          onClose={() => setProfileBacenta(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface BacentaMemberRow {
+  id: string;
+  full_name: string;
+  phone_number: string;
+  photo_url: string | null;
+  member_type: 'Regular Member' | 'First Timer' | 'New Believer';
+  profile_type: 'member' | 'first-timer' | 'new-believer';
+}
+
+function BacentaProfileModal({
+  bacenta, branchId, isDemo, onClose,
+}: {
+  bacenta: Bacenta;
+  branchId: string;
+  isDemo: boolean;
+  onClose: () => void;
+}) {
+  const supabase = createClient();
+  const [members, setMembers] = useState<BacentaMemberRow[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (isDemo) {
+        const demoRows: BacentaMemberRow[] = DEMO_MEMBERS
+          .filter((m) => m.bacenta === bacenta.name)
+          .map((m) => ({
+            id: m.id,
+            full_name: m.full_name,
+            phone_number: m.phone_number,
+            photo_url: m.photo_url,
+            member_type: 'Regular Member' as const,
+            profile_type: 'member' as const,
+          }));
+        if (!cancelled) {
+          setMembers(demoRows);
+          setLoadingMembers(false);
+        }
+        return;
+      }
+
+      const [mRes, ftRes, nbRes] = await Promise.all([
+        supabase.from('members').select('id, full_name, phone_number, photo_url').eq('branch_id', branchId).eq('bacenta', bacenta.name).order('full_name'),
+        supabase.from('first_timers').select('id, full_name, phone_number, photo_url').eq('branch_id', branchId).eq('bacenta', bacenta.name).eq('status', 'first_timer').order('full_name'),
+        supabase.from('new_believers').select('id, full_name, phone_number, photo_url').eq('branch_id', branchId).eq('bacenta', bacenta.name).order('full_name'),
+      ]);
+
+      type Row = { id: string; full_name: string; phone_number: string; photo_url: string | null };
+      const rows: BacentaMemberRow[] = [
+        ...(mRes.data || []).map((m: Row) => ({ ...m, member_type: 'Regular Member' as const, profile_type: 'member' as const })),
+        ...(ftRes.data || []).map((m: Row) => ({ ...m, member_type: 'First Timer' as const, profile_type: 'first-timer' as const })),
+        ...(nbRes.data || []).map((m: Row) => ({ ...m, member_type: 'New Believer' as const, profile_type: 'new-believer' as const })),
+      ];
+
+      // Drop duplicates (same person in members + first_timers/new_believers)
+      const seen = new Set<string>();
+      const deduped = rows.filter((r) => {
+        const key = r.full_name.toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      if (!cancelled) {
+        setMembers(deduped);
+        setLoadingMembers(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bacenta.id]);
+
+  const typeColors: Record<string, string> = {
+    'Regular Member': 'bg-blue-100 text-blue-800',
+    'First Timer': 'bg-purple-100 text-purple-800',
+    'New Believer': 'bg-orange-100 text-orange-800',
+  };
+
+  const leaderNames = (bacenta.shepherds || []).map((s) => s.full_name);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-100">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center">
+                <FolderTree size={24} className="text-orange-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-black">{bacenta.name}</h2>
+                {bacenta.location && (
+                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                    <MapPin size={12} /> {bacenta.location}
+                  </p>
+                )}
+              </div>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-black p-1">
+              <X size={20} />
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="bg-blue-50 rounded-lg p-3">
+              <p className="text-[10px] text-blue-600 uppercase font-semibold flex items-center gap-1">
+                <User size={11} /> Leader / Shepherd
+              </p>
+              <p className="text-sm font-medium text-black mt-1">
+                {leaderNames.length > 0 ? leaderNames.join(', ') : bacenta.leader_name || 'Unassigned'}
+              </p>
+            </div>
+            <div className="bg-orange-50 rounded-lg p-3">
+              <p className="text-[10px] text-orange-600 uppercase font-semibold flex items-center gap-1">
+                <Users size={11} /> Members
+              </p>
+              <p className="text-sm font-medium text-black mt-1">
+                {loadingMembers ? '...' : members.length}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Member list */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {loadingMembers ? (
+            <div className="flex justify-center py-10">
+              <div className="w-7 h-7 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : members.length === 0 ? (
+            <div className="text-center py-10 text-gray-400 text-sm">No members in this bacenta yet</div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {members.map((m) => (
+                <Link
+                  key={`${m.profile_type}-${m.id}`}
+                  href={`/dashboard/profile/${m.profile_type}/${m.id}`}
+                  className="flex items-center justify-between gap-3 px-2 py-2.5 hover:bg-orange-50/50 rounded-lg transition"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
+                      {m.photo_url ? (
+                        <img src={m.photo_url} alt={m.full_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-white text-[10px] font-bold">
+                          {m.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-black truncate">{m.full_name}</p>
+                      <p className="text-xs text-gray-500 truncate">{m.phone_number || 'No phone'}</p>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-semibold shrink-0 ${typeColors[m.member_type]}`}>
+                    {m.member_type}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

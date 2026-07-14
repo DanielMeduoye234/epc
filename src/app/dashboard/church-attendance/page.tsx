@@ -8,13 +8,16 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
 } from 'recharts';
 import {
-  Users, Plus, X, Search, BarChart3, Grid3X3,
-  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, Edit2,
+  Users, Plus, X, Search, BarChart3, Grid3X3, CalendarDays,
+  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree,
 } from 'lucide-react';
 import React from 'react';
 import BacentaSelect from '@/components/BacentaSelect';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
+type ExistingMemberRow = { first_timer_id: string | null; full_name: string; phone_number: string };
+
+async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: string) {
   const [ftRes, nbRes] = await Promise.all([
     supabase.from('first_timers').select('*').eq('branch_id', branchId).eq('status', 'first_timer'),
     supabase.from('new_believers').select('*').eq('branch_id', branchId)
@@ -26,9 +29,10 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
   if (firstTimers.length === 0 && newBelievers.length === 0) return;
 
   const { data: currentMembers } = await supabase.from('members').select('full_name, phone_number, first_timer_id').eq('branch_id', branchId);
-  const existingFtIds = new Set((currentMembers || []).map((m: any) => m.first_timer_id).filter(Boolean));
-  const existingNames = new Set((currentMembers || []).map((m: any) => m.full_name.toLowerCase().trim()));
-  const existingPhones = new Set((currentMembers || []).map((m: any) => m.phone_number.trim()).filter(Boolean));
+  const memberRows: ExistingMemberRow[] = currentMembers || [];
+  const existingFtIds = new Set(memberRows.map((m) => m.first_timer_id).filter(Boolean));
+  const existingNames = new Set(memberRows.map((m) => m.full_name.toLowerCase().trim()));
+  const existingPhones = new Set(memberRows.map((m) => m.phone_number.trim()).filter(Boolean));
 
   if (firstTimers.length > 0) {
     const ftIds = firstTimers.map(f => f.id);
@@ -39,7 +43,7 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
       .eq('is_present', true);
 
     const ftCounts: Record<string, number> = {};
-    (ftAtt || []).forEach((a: any) => {
+    (ftAtt || []).forEach((a: { person_id: string }) => {
       ftCounts[a.person_id] = (ftCounts[a.person_id] || 0) + 1;
     });
 
@@ -76,7 +80,7 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
       .eq('is_present', true);
 
     const nbCounts: Record<string, number> = {};
-    (nbAtt || []).forEach((a: any) => {
+    (nbAtt || []).forEach((a: { person_id: string }) => {
       nbCounts[a.person_id] = (nbCounts[a.person_id] || 0) + 1;
     });
 
@@ -101,6 +105,26 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
   }
 }
 
+// The same person can exist in members + first_timers/new_believers (added as a
+// member marked "first timer", or auto-promoted). Keep the members-table row and
+// drop duplicates matched by name/phone so no one is listed twice.
+function dedupePeople<T extends { full_name: string; phone_number?: string | null; person_type: string }>(list: T[]): T[] {
+  const priority: Record<string, number> = { member: 0, first_timer: 1, new_believer: 2 };
+  const sorted = [...list].sort((a, b) => (priority[a.person_type] ?? 3) - (priority[b.person_type] ?? 3));
+  const seenNames = new Set<string>();
+  const seenPhones = new Set<string>();
+  const result: T[] = [];
+  for (const person of sorted) {
+    const name = person.full_name.toLowerCase().trim();
+    const phone = person.phone_number?.replace(/\D/g, '') || '';
+    if (seenNames.has(name) || (phone && seenPhones.has(phone))) continue;
+    seenNames.add(name);
+    if (phone) seenPhones.add(phone);
+    result.push(person);
+  }
+  return result;
+}
+
 function getSundaysFromMonth(year: number, month: number): Date[] {
   const sundays: Date[] = [];
   const d = new Date(year, month, 1);
@@ -120,7 +144,19 @@ function toDateStr(d: Date) {
   return `${year}-${month}-${day}`;
 }
 
-type Tab = 'overview' | 'tracker';
+type Tab = 'overview' | 'tracker' | 'records';
+
+type PersonType = 'member' | 'first_timer' | 'new_believer';
+
+// Minimal shape this page needs, shared by members, first timers and new believers
+interface TrackedPerson {
+  id: string;
+  full_name: string;
+  phone_number: string;
+  bacenta: string;
+  status: string;
+  person_type: PersonType;
+}
 
 interface AddForm {
   full_name: string;
@@ -160,7 +196,7 @@ export default function ChurchAttendancePage() {
   const supabase = createClient();
 
   const [tab, setTab] = useState<Tab>('overview');
-  const [members, setMembers] = useState<Member[]>([]);
+  const [members, setMembers] = useState<TrackedPerson[]>([]);
   const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [weeklyAttendance, setWeeklyAttendance] = useState<WeeklyAttendancePoint[]>([]);
   const [weeklyFirstTimers, setWeeklyFirstTimers] = useState<WeeklyFirstTimerPoint[]>([]);
@@ -186,7 +222,7 @@ export default function ChurchAttendancePage() {
   const [trackerMonth, setTrackerMonth] = useState(now.getMonth());
   const [trackerBacenta, setTrackerBacenta] = useState('all');
   const [trackerSearch, setTrackerSearch] = useState('');
-  const [selectedSunday, setSelectedSunday] = useState('');
+  const [pickedSunday, setSelectedSunday] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'unmarked' | 'absent' | 'present'>('all');
   const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, boolean>>>({});
   const [loadingAtt, setLoadingAtt] = useState(false);
@@ -196,7 +232,7 @@ export default function ChurchAttendancePage() {
   useEffect(() => { if (profile) fetchData(); }, [profile]);
 
   useEffect(() => {
-    if (tab === 'tracker' && members.length > 0) fetchTrackerAttendance();
+    if ((tab === 'tracker' || tab === 'records') && members.length > 0) fetchTrackerAttendance();
   }, [tab, trackerYear, trackerMonth, members]);
 
   async function fetchData() {
@@ -214,11 +250,11 @@ export default function ChurchAttendancePage() {
       supabase.from('first_timers').select('date_joined').eq('branch_id', profile!.branch_id).gte('date_joined', weeklyStartDate),
     ]);
 
-    const mList = (mRes.data || []).map((x: any) => ({ ...x, person_type: 'member' }));
-    const ftList = (ftRes.data || []).map((x: any) => ({ ...x, person_type: 'first_timer', status: 'active' }));
-    const nbList = (nbRes.data || []).map((x: any) => ({ ...x, person_type: 'new_believer', date_joined: x.date_saved, status: 'active' }));
+    const mList: TrackedPerson[] = ((mRes.data || []) as Member[]).map((x) => ({ ...x, person_type: 'member' as const }));
+    const ftList: TrackedPerson[] = ((ftRes.data || []) as FirstTimer[]).map((x) => ({ ...x, person_type: 'first_timer' as const, status: 'active' }));
+    const nbList: TrackedPerson[] = ((nbRes.data || []) as NewBeliever[]).map((x) => ({ ...x, person_type: 'new_believer' as const, date_joined: x.date_saved, status: 'active' }));
 
-    setMembers([...mList, ...ftList, ...nbList] as any);
+    setMembers(dedupePeople([...mList, ...ftList, ...nbList]));
     setBacentas(bRes.data || []);
 
     const weekSeed: Record<string, WeeklyAttendancePoint> = {};
@@ -266,7 +302,7 @@ export default function ChurchAttendancePage() {
     const { data } = await supabase
       .from('attendance')
       .select('person_id, date, is_present')
-      .in('person_id', members.map((m: any) => m.id))
+      .in('person_id', members.map((m) => m.id))
       .gte('date', startDate)
       .lte('date', endDate);
 
@@ -299,7 +335,7 @@ export default function ChurchAttendancePage() {
     });
 
     const targetMember = members.find(m => m.id === memberId);
-    const personType = (targetMember as any)?.person_type || 'member';
+    const personType = targetMember?.person_type || 'member';
 
     const { error } = newVal === undefined
       ? await supabase
@@ -445,16 +481,13 @@ export default function ChurchAttendancePage() {
     ),
     [members, trackerBacenta, trackerSearch]);
 
-  useEffect(() => {
+  // Derive the active Sunday: the user's pick when it belongs to this month,
+  // otherwise the first Sunday of the month (no state syncing needed).
+  const selectedSunday = useMemo(() => {
     const availableSundays = sundays.map(toDateStr);
-    if (availableSundays.length === 0) {
-      setSelectedSunday('');
-      return;
-    }
-    if (!selectedSunday || !availableSundays.includes(selectedSunday)) {
-      setSelectedSunday(availableSundays[0]);
-    }
-  }, [sundays, selectedSunday]);
+    if (availableSundays.length === 0) return '';
+    return pickedSunday && availableSundays.includes(pickedSunday) ? pickedSunday : availableSundays[0];
+  }, [pickedSunday, sundays]);
 
   const totalActive = members.filter(m => m.status === 'active').length;
   const totalFlagged = members.filter(m => m.status === 'flagged').length;
@@ -471,7 +504,7 @@ export default function ChurchAttendancePage() {
   }, [trackerMembers, attendanceMap, selectedSunday, statusFilter]);
 
   const groupedFilteredTrackerMembers = useMemo(() => {
-    const map: Record<string, Member[]> = {};
+    const map: Record<string, TrackedPerson[]> = {};
     filteredTrackerMembers.forEach((m) => {
       if (!map[m.bacenta]) map[m.bacenta] = [];
       map[m.bacenta].push(m);
@@ -530,7 +563,7 @@ export default function ChurchAttendancePage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {([['overview', BarChart3, 'Overview'], ['tracker', Grid3X3, 'Attendance Tracker']] as const).map(([key, Icon, label]) => (
+        {([['overview', BarChart3, 'Overview'], ['tracker', Grid3X3, 'Attendance Tracker'], ['records', CalendarDays, 'Monthly Records']] as const).map(([key, Icon, label]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -988,6 +1021,148 @@ export default function ChurchAttendancePage() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== MONTHLY RECORDS TAB ===== */}
+      {tab === 'records' && (
+        <div className="space-y-4">
+          {/* Controls */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+              <button
+                onClick={() => setTrackerMonth(m => m === 0 ? 11 : m - 1)}
+                className="p-0.5 text-gray-500 hover:text-orange-600 transition"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span className="font-bold text-black min-w-30 text-center text-sm">
+                {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
+              </span>
+              <button
+                onClick={() => setTrackerMonth(m => m === 11 ? 0 : m + 1)}
+                className="p-0.5 text-gray-500 hover:text-orange-600 transition"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
+            <select
+              value={trackerBacenta}
+              onChange={e => setTrackerBacenta(e.target.value)}
+              className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-black outline-none focus:ring-2 focus:ring-orange-500"
+            >
+              <option value="all">All Bacentas</option>
+              {allBacentas.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+
+            <span className="text-xs text-gray-400">
+              {sundays.length} Sundays this month
+            </span>
+          </div>
+
+          {loadingAtt ? (
+            <div className="flex justify-center py-16">
+              <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <>
+              {/* Cumulative summary cards */}
+              {(() => {
+                const totalPresent = sundayRecords.reduce((s, r) => s + r.present, 0);
+                const totalAbsent = sundayRecords.reduce((s, r) => s + r.absent, 0);
+                const totalMarked = totalPresent + totalAbsent;
+                const avgRate = totalMarked > 0 ? Math.round((totalPresent / totalMarked) * 100) : 0;
+                const recordedSundays = sundayRecords.filter((r) => r.total > 0).length;
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                      <p className="text-[10px] text-gray-500 uppercase">Sundays Recorded</p>
+                      <p className="text-2xl font-bold text-black">{recordedSundays}<span className="text-sm text-gray-400 font-normal"> / {sundayRecords.length}</span></p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                      <p className="text-[10px] text-gray-500 uppercase">Total Present</p>
+                      <p className="text-2xl font-bold text-green-600">{totalPresent}</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                      <p className="text-[10px] text-gray-500 uppercase">Total Absent</p>
+                      <p className="text-2xl font-bold text-red-500">{totalAbsent}</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                      <p className="text-[10px] text-gray-500 uppercase">Avg Attendance Rate</p>
+                      <p className={`text-2xl font-bold ${avgRate >= 70 ? 'text-green-600' : avgRate >= 40 ? 'text-amber-500' : 'text-red-500'}`}>{avgRate}%</p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Per-Sunday cumulative table */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100">
+                  <h3 className="text-sm font-semibold text-black">
+                    Sunday-by-Sunday Record — {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
+                    {trackerBacenta !== 'all' && <span className="text-gray-400 font-normal"> · {trackerBacenta}</span>}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">All attendance saved for each Sunday in the month, with running totals.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Sunday</th>
+                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Present</th>
+                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Absent</th>
+                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Total Marked</th>
+                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Rate</th>
+                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Cumulative Present</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {(() => {
+                        let running = 0;
+                        return sundayRecords.map((record) => {
+                          running += record.present;
+                          return (
+                            <tr key={record.dayKey} className="hover:bg-orange-50/30 transition">
+                              <td className="px-5 py-3 text-sm font-medium text-black">{record.label}</td>
+                              <td className="px-5 py-3 text-sm text-green-700 text-right font-semibold">{record.present}</td>
+                              <td className="px-5 py-3 text-sm text-red-600 text-right font-semibold">{record.absent}</td>
+                              <td className="px-5 py-3 text-sm text-gray-600 text-right">{record.total}</td>
+                              <td className="px-5 py-3 text-right">
+                                <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${
+                                  record.total === 0 ? 'bg-gray-100 text-gray-500' :
+                                  record.attendanceRate >= 70 ? 'bg-green-100 text-green-700' :
+                                  record.attendanceRate >= 40 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {record.total === 0 ? '—' : `${record.attendanceRate}%`}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-sm text-black text-right font-bold">{running}</td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                      {sundayRecords.length === 0 && (
+                        <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">No Sundays in this month</td></tr>
+                      )}
+                    </tbody>
+                    {sundayRecords.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-gray-50 border-t border-gray-200">
+                          <td className="px-5 py-3 text-sm font-bold text-black">Month Total</td>
+                          <td className="px-5 py-3 text-sm text-green-700 text-right font-bold">{sundayRecords.reduce((s, r) => s + r.present, 0)}</td>
+                          <td className="px-5 py-3 text-sm text-red-600 text-right font-bold">{sundayRecords.reduce((s, r) => s + r.absent, 0)}</td>
+                          <td className="px-5 py-3 text-sm text-gray-700 text-right font-bold">{sundayRecords.reduce((s, r) => s + r.total, 0)}</td>
+                          <td className="px-5 py-3" />
+                          <td className="px-5 py-3 text-sm text-black text-right font-bold">{sundayRecords.reduce((s, r) => s + r.present, 0)}</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
