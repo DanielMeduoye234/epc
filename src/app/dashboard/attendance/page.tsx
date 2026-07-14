@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, @next/next/no-img-element */
 
 import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, FirstTimer, NewBeliever } from '@/lib/types';
@@ -139,6 +140,12 @@ export default function AttendancePage() {
   const [bacentaFilter, setBacentaFilter] = useState('all');
 
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'bishop';
+
+  // Shepherd's Data is no longer available to super admins — send them home
+  const router = useRouter();
+  useEffect(() => {
+    if (profile?.role === 'super_admin') router.replace('/dashboard');
+  }, [profile, router]);
 
   useEffect(() => {
     if (profile) {
@@ -392,13 +399,16 @@ export default function AttendancePage() {
     );
   }, [members, search, bacentaFilter]);
 
+  // Super admins are redirected away (see effect above) — render nothing meanwhile
+  if (profile?.role === 'super_admin') return null;
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
-  // ==================== SUPER ADMIN VIEW ====================
+  // ==================== BISHOP ADMIN VIEW ====================
   if (isAdmin) {
     const totalSheep = shepherdStats.reduce((s, sh) => s + sh.totalSheep, 0);
     const totalFaithful = shepherdStats.reduce((s, sh) => s + sh.faithful, 0);

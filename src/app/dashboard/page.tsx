@@ -720,7 +720,7 @@ export default function DashboardPage() {
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3">
           <Link
-            href="/dashboard/members"
+            href="/dashboard/regular-members"
             className="flex items-center justify-center gap-2 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-orange-200 transition text-sm font-medium text-gray-700"
           >
             <Users size={18} className="text-orange-500" />

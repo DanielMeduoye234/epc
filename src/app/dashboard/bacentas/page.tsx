@@ -467,8 +467,7 @@ interface BacentaMemberRow {
   full_name: string;
   phone_number: string;
   photo_url: string | null;
-  member_type: 'Regular Member' | 'First Timer' | 'New Believer';
-  profile_type: 'member' | 'first-timer' | 'new-believer';
+  status: string;
 }
 
 function BacentaProfileModal({
@@ -495,8 +494,7 @@ function BacentaProfileModal({
             full_name: m.full_name,
             phone_number: m.phone_number,
             photo_url: m.photo_url,
-            member_type: 'Regular Member' as const,
-            profile_type: 'member' as const,
+            status: m.status,
           }));
         if (!cancelled) {
           setMembers(demoRows);
@@ -505,30 +503,17 @@ function BacentaProfileModal({
         return;
       }
 
-      const [mRes, ftRes, nbRes] = await Promise.all([
-        supabase.from('members').select('id, full_name, phone_number, photo_url').eq('branch_id', branchId).eq('bacenta', bacenta.name).order('full_name'),
-        supabase.from('first_timers').select('id, full_name, phone_number, photo_url').eq('branch_id', branchId).eq('bacenta', bacenta.name).eq('status', 'first_timer').order('full_name'),
-        supabase.from('new_believers').select('id, full_name, phone_number, photo_url').eq('branch_id', branchId).eq('bacenta', bacenta.name).order('full_name'),
-      ]);
-
-      type Row = { id: string; full_name: string; phone_number: string; photo_url: string | null };
-      const rows: BacentaMemberRow[] = [
-        ...(mRes.data || []).map((m: Row) => ({ ...m, member_type: 'Regular Member' as const, profile_type: 'member' as const })),
-        ...(ftRes.data || []).map((m: Row) => ({ ...m, member_type: 'First Timer' as const, profile_type: 'first-timer' as const })),
-        ...(nbRes.data || []).map((m: Row) => ({ ...m, member_type: 'New Believer' as const, profile_type: 'new-believer' as const })),
-      ];
-
-      // Drop duplicates (same person in members + first_timers/new_believers)
-      const seen = new Set<string>();
-      const deduped = rows.filter((r) => {
-        const key = r.full_name.toLowerCase().trim();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // Regular members only — keeps this count in sync with the card and the
+      // Regular Members page.
+      const { data } = await supabase
+        .from('members')
+        .select('id, full_name, phone_number, photo_url, status')
+        .eq('branch_id', branchId)
+        .eq('bacenta', bacenta.name)
+        .order('full_name');
 
       if (!cancelled) {
-        setMembers(deduped);
+        setMembers(data || []);
         setLoadingMembers(false);
       }
     }
@@ -538,10 +523,10 @@ function BacentaProfileModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bacenta.id]);
 
-  const typeColors: Record<string, string> = {
-    'Regular Member': 'bg-blue-100 text-blue-800',
-    'First Timer': 'bg-purple-100 text-purple-800',
-    'New Believer': 'bg-orange-100 text-orange-800',
+  const statusColors: Record<string, string> = {
+    active: 'bg-green-100 text-green-700',
+    inactive: 'bg-gray-100 text-gray-700',
+    flagged: 'bg-red-100 text-red-700',
   };
 
   const leaderNames = (bacenta.shepherds || []).map((s) => s.full_name);
@@ -602,8 +587,8 @@ function BacentaProfileModal({
             <div className="divide-y divide-gray-50">
               {members.map((m) => (
                 <Link
-                  key={`${m.profile_type}-${m.id}`}
-                  href={`/dashboard/profile/${m.profile_type}/${m.id}`}
+                  key={m.id}
+                  href={`/dashboard/profile/member/${m.id}`}
                   className="flex items-center justify-between gap-3 px-2 py-2.5 hover:bg-orange-50/50 rounded-lg transition"
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -621,8 +606,8 @@ function BacentaProfileModal({
                       <p className="text-xs text-gray-500 truncate">{m.phone_number || 'No phone'}</p>
                     </div>
                   </div>
-                  <span className={`px-2 py-0.5 rounded text-[9px] font-semibold shrink-0 ${typeColors[m.member_type]}`}>
-                    {m.member_type}
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold capitalize shrink-0 ${statusColors[m.status] || 'bg-gray-100 text-gray-700'}`}>
+                    {m.status}
                   </span>
                 </Link>
               ))}

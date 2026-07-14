@@ -105,26 +105,6 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
   }
 }
 
-// The same person can exist in members + first_timers/new_believers (added as a
-// member marked "first timer", or auto-promoted). Keep the members-table row and
-// drop duplicates matched by name/phone so no one is listed twice.
-function dedupePeople<T extends { full_name: string; phone_number?: string | null; person_type: string }>(list: T[]): T[] {
-  const priority: Record<string, number> = { member: 0, first_timer: 1, new_believer: 2 };
-  const sorted = [...list].sort((a, b) => (priority[a.person_type] ?? 3) - (priority[b.person_type] ?? 3));
-  const seenNames = new Set<string>();
-  const seenPhones = new Set<string>();
-  const result: T[] = [];
-  for (const person of sorted) {
-    const name = person.full_name.toLowerCase().trim();
-    const phone = person.phone_number?.replace(/\D/g, '') || '';
-    if (seenNames.has(name) || (phone && seenPhones.has(phone))) continue;
-    seenNames.add(name);
-    if (phone) seenPhones.add(phone);
-    result.push(person);
-  }
-  return result;
-}
-
 function getSundaysFromMonth(year: number, month: number): Date[] {
   const sundays: Date[] = [];
   const d = new Date(year, month, 1);
@@ -241,20 +221,18 @@ export default function ChurchAttendancePage() {
     eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
     const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
 
-    const [mRes, ftRes, nbRes, bRes, attendanceRes, firstTimersRes] = await Promise.all([
+    const [mRes, bRes, attendanceRes, firstTimersRes] = await Promise.all([
       supabase.from('members').select('*').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
-      supabase.from('first_timers').select('*').eq('branch_id', profile!.branch_id).eq('status', 'first_timer').order('bacenta').order('full_name'),
-      supabase.from('new_believers').select('*').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
       supabase.from('bacentas').select('*').eq('branch_id', profile!.branch_id).order('name'),
       supabase.from('attendance').select('date, is_present').eq('branch_id', profile!.branch_id).gte('date', weeklyStartDate),
       supabase.from('first_timers').select('date_joined').eq('branch_id', profile!.branch_id).gte('date_joined', weeklyStartDate),
     ]);
 
+    // Only regular members are tracked here — the members table is the single
+    // source of truth so counts match the Regular Members page and dashboard.
     const mList: TrackedPerson[] = ((mRes.data || []) as Member[]).map((x) => ({ ...x, person_type: 'member' as const }));
-    const ftList: TrackedPerson[] = ((ftRes.data || []) as FirstTimer[]).map((x) => ({ ...x, person_type: 'first_timer' as const, status: 'active' }));
-    const nbList: TrackedPerson[] = ((nbRes.data || []) as NewBeliever[]).map((x) => ({ ...x, person_type: 'new_believer' as const, date_joined: x.date_saved, status: 'active' }));
 
-    setMembers(dedupePeople([...mList, ...ftList, ...nbList]));
+    setMembers(mList);
     setBacentas(bRes.data || []);
 
     const weekSeed: Record<string, WeeklyAttendancePoint> = {};
