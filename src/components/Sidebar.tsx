@@ -32,7 +32,7 @@ const navigation = [
   { name: 'New Believers', href: '/dashboard/new-believers', icon: Heart, roles: ['bishop', 'super_admin', 'recorder'] },
   { name: 'First Timers', href: '/dashboard/first-timers', icon: UserPlus, roles: ['bishop', 'super_admin', 'recorder'] },
   { name: 'My Sheep', href: '/dashboard/regular-members', icon: Users, roles: ['shepherd'] },
-  { name: 'Regular Members', href: '/dashboard/regular-members', icon: Users, roles: ['bishop', 'super_admin'] },
+  { name: 'Members', href: '/dashboard/regular-members', icon: Users, roles: ['bishop', 'super_admin'] },
   { name: 'Bacentas', href: '/dashboard/bacentas', icon: FolderTree, roles: ['bishop', 'super_admin'] },
   { name: 'Shepherds', href: '/dashboard/shepherds', icon: Users, roles: ['bishop', 'super_admin'] },
   { name: 'Church Attendance', href: '/dashboard/church-attendance', icon: ClipboardList, roles: ['bishop', 'super_admin'] },
@@ -69,7 +69,7 @@ export default function Sidebar() {
     router.refresh();
   };
 
-  const NavContent = () => (
+  const navContent = (
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="p-6 border-b border-gray-100">
@@ -156,14 +156,14 @@ export default function Sidebar() {
             >
               <X size={20} className="text-gray-500" />
             </button>
-            <NavContent />
+            {navContent}
           </div>
         </div>
       )}
 
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex lg:w-72 lg:flex-col lg:fixed lg:inset-y-0 bg-white border-r border-gray-200">
-        <NavContent />
+        {navContent}
       </aside>
     </>
   );

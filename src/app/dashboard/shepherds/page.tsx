@@ -231,15 +231,28 @@ export default function ShepherdsPage() {
       });
     }
 
+    // Each person counts under exactly ONE shepherd so branch totals never
+    // double-count: a direct assignment wins, otherwise the (first) shepherd
+    // of their bacenta owns them.
+    const shepherdIdSet = new Set(shepherdIds);
+    const bacentaToShepherds: Record<string, string[]> = {};
+    Object.entries(bacentaMap).forEach(([sid, names]) => {
+      names.forEach((name) => {
+        if (!bacentaToShepherds[name]) bacentaToShepherds[name] = [];
+        bacentaToShepherds[name].push(sid);
+      });
+    });
+    const ownerOf = (p: { assigned_shepherd: string | null; bacenta: string }): string | null =>
+      p.assigned_shepherd && shepherdIdSet.has(p.assigned_shepherd)
+        ? p.assigned_shepherd
+        : (bacentaToShepherds[p.bacenta] || [])[0] || null;
+
     const result: ShepherdProfile[] = shepherdProfiles.map((sp: { id: string; full_name: string; email: string }) => {
-      // A member belongs to this shepherd if they sit in one of the shepherd's
-      // assigned bacentas, or were explicitly assigned to them directly.
-      const shepherdBacentaNames = bacentaMap[sp.id] || [];
       const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null; bacenta: string }) =>
-        m.assigned_shepherd === sp.id || shepherdBacentaNames.includes(m.bacenta)
+        ownerOf(m) === sp.id
       );
       const firstTimers = (allFirstTimers || []).filter((ft: { assigned_shepherd: string | null; bacenta: string }) =>
-        ft.assigned_shepherd === sp.id || shepherdBacentaNames.includes(ft.bacenta)
+        ownerOf(ft) === sp.id
       );
       const members: ShepherdMember[] = sheep.map((m: { id: string; full_name: string; photo_url: string | null; status: string; bacenta: string; phone_number: string; date_joined: string }) => {
         const record = attendanceMap[m.id] || { present: 0, total: 0 };

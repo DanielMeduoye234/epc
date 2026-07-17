@@ -21,6 +21,7 @@ export default function RegularMembersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [bacentaFilter, setBacentaFilter] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editMember, setEditMember] = useState<MemberWithShepherd | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -189,8 +190,16 @@ export default function RegularMembersPage() {
       m.full_name.toLowerCase().includes(search.toLowerCase()) ||
       m.bacenta.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || m.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesBacenta = bacentaFilter === 'all' || m.bacenta === bacentaFilter;
+    return matchesSearch && matchesStatus && matchesBacenta;
   });
+
+  // Every bacenta that actually appears in the member list (covers "Others" etc.)
+  const bacentaFilterOptions = useMemo(() => {
+    const names = new Set<string>();
+    members.forEach((m) => { if (m.bacenta) names.add(m.bacenta); });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [members]);
 
   const ITEMS_PER_PAGE = 10;
   const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
@@ -235,7 +244,7 @@ export default function RegularMembersPage() {
           <Lock size={28} className="text-gray-400" />
         </div>
         <h2 className="text-lg font-semibold text-gray-800 mb-1">Access Restricted</h2>
-        <p className="text-sm text-gray-500">Regular members are managed by Shepherds and Admins.</p>
+        <p className="text-sm text-gray-500">Members are managed by Shepherds and Admins.</p>
       </div>
     );
   }
@@ -245,10 +254,10 @@ export default function RegularMembersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-black">
-            {profile?.role === 'shepherd' ? 'My Regular Sheep' : 'Regular Members'}
+            {profile?.role === 'shepherd' ? 'My Sheep' : 'Members'}
           </h1>
           <p className="text-gray-500 mt-1">
-            {profile?.role === 'shepherd' ? 'Manage and track your regular sheep fold' : 'All regular church members'}
+            {profile?.role === 'shepherd' ? 'Manage and track your sheep fold' : 'All church members'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -270,6 +279,18 @@ export default function RegularMembersPage() {
           <Search size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" placeholder="Search by name or bacenta..." value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
             className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black" />
+        </div>
+        <div className="sm:w-56">
+          <BacentaSelect
+            value={bacentaFilter}
+            onChange={(val) => { setBacentaFilter(val); setCurrentPage(1); }}
+            options={[
+              { value: 'all', label: 'All Bacentas' },
+              ...bacentaFilterOptions.map((name) => ({ value: name, label: name })),
+            ]}
+            className="px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full"
+            placeholder="All Bacentas"
+          />
         </div>
         <div className="sm:w-56">
           <BacentaSelect

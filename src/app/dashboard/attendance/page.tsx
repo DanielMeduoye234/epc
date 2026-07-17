@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, FirstTimer, NewBeliever } from '@/lib/types';
@@ -30,7 +31,27 @@ interface ShepherdStats {
   weeklyRates: number[];
 }
 
-async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
+// The same person can exist in members + first_timers/new_believers (e.g. a
+// promoted new believer). Keep the members-table row and drop duplicates
+// matched by name/phone so nobody is counted twice in the analytics.
+function dedupePeople(list: MemberWithHistory[]): MemberWithHistory[] {
+  const priority: Record<string, number> = { member: 0, first_timer: 1, new_believer: 2 };
+  const sorted = [...list].sort((a, b) => (priority[a.person_type] ?? 3) - (priority[b.person_type] ?? 3));
+  const seenNames = new Set<string>();
+  const seenPhones = new Set<string>();
+  const result: MemberWithHistory[] = [];
+  for (const person of sorted) {
+    const name = person.full_name.toLowerCase().trim();
+    const phone = (person.phone_number || '').replace(/\D/g, '');
+    if (seenNames.has(name) || (phone && seenPhones.has(phone))) continue;
+    seenNames.add(name);
+    if (phone) seenPhones.add(phone);
+    result.push(person);
+  }
+  return result;
+}
+
+async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: string) {
   // 1. Get all active first_timers and new_believers in this branch
   const [ftRes, nbRes] = await Promise.all([
     supabase.from('first_timers').select('*').eq('branch_id', branchId).eq('status', 'first_timer'),
@@ -44,9 +65,10 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
 
   // Get current members to avoid duplicates
   const { data: currentMembers } = await supabase.from('members').select('full_name, phone_number, first_timer_id').eq('branch_id', branchId);
-  const existingFtIds = new Set((currentMembers || []).map((m: any) => m.first_timer_id).filter(Boolean));
-  const existingNames = new Set((currentMembers || []).map((m: any) => m.full_name.toLowerCase().trim()));
-  const existingPhones = new Set((currentMembers || []).map((m: any) => m.phone_number.trim()).filter(Boolean));
+  const memberRows: { first_timer_id: string | null; full_name: string; phone_number: string }[] = currentMembers || [];
+  const existingFtIds = new Set(memberRows.map((m) => m.first_timer_id).filter(Boolean));
+  const existingNames = new Set(memberRows.map((m) => m.full_name.toLowerCase().trim()));
+  const existingPhones = new Set(memberRows.map((m) => m.phone_number.trim()).filter(Boolean));
 
   // 2. Fetch present attendance counts for first timers
   if (firstTimers.length > 0) {
@@ -58,7 +80,7 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
       .eq('is_present', true);
 
     const ftCounts: Record<string, number> = {};
-    (ftAtt || []).forEach((a: any) => {
+    (ftAtt || []).forEach((a: { person_id: string }) => {
       ftCounts[a.person_id] = (ftCounts[a.person_id] || 0) + 1;
     });
 
@@ -96,7 +118,7 @@ async function checkAndPromoteIndividuals(supabase: any, branchId: string) {
       .eq('is_present', true);
 
     const nbCounts: Record<string, number> = {};
-    (nbAtt || []).forEach((a: any) => {
+    (nbAtt || []).forEach((a: { person_id: string }) => {
       nbCounts[a.person_id] = (nbCounts[a.person_id] || 0) + 1;
     });
 
@@ -159,18 +181,18 @@ export default function AttendancePage() {
         setShepherdNameMap(demoMap);
 
         const listMembers: MemberWithHistory[] = DEMO_MEMBERS.map(m => ({ ...m, person_type: 'member' }));
-        const listFirstTimers: MemberWithHistory[] = DEMO_FIRST_TIMERS.filter(ft => ft.status === 'first_timer').map(ft => ({
+        const listFirstTimers = DEMO_FIRST_TIMERS.filter(ft => ft.status === 'first_timer').map(ft => ({
           ...ft,
           person_type: 'first_timer',
           status: 'active'
-        })) as any;
-        const listNewBelievers: MemberWithHistory[] = DEMO_NEW_BELIEVERS.map(nb => ({
+        })) as unknown as MemberWithHistory[];
+        const listNewBelievers = DEMO_NEW_BELIEVERS.map(nb => ({
           ...nb,
           person_type: 'new_believer',
           date_joined: nb.date_saved,
           assigned_shepherd: nb.recorded_by,
           status: 'active'
-        })) as any;
+        })) as unknown as MemberWithHistory[];
 
         const combined = [...listMembers, ...listFirstTimers, ...listNewBelievers];
 
@@ -244,21 +266,21 @@ export default function AttendancePage() {
       supabase.from('profiles').select('id, full_name').eq('branch_id', profile!.branch_id)
     ]);
 
-    const mList: MemberWithHistory[] = (mRes.data || []).map((x: any) => ({ ...x, person_type: 'member' }));
-    const ftList: MemberWithHistory[] = (ftRes.data || []).map((x: any) => ({
+    const mList: MemberWithHistory[] = ((mRes.data || []) as Member[]).map((x) => ({ ...x, person_type: 'member' as const }));
+    const ftList = ((ftRes.data || []) as FirstTimer[]).map((x) => ({
       ...x,
       person_type: 'first_timer',
       status: 'active'
-    })) as any;
-    const nbList: MemberWithHistory[] = (nbRes.data || []).map((x: any) => ({
+    })) as unknown as MemberWithHistory[];
+    const nbList = ((nbRes.data || []) as NewBeliever[]).map((x) => ({
       ...x,
       person_type: 'new_believer',
       date_joined: x.date_saved,
       assigned_shepherd: x.recorded_by,
       status: 'active'
-    })) as any;
+    })) as unknown as MemberWithHistory[];
 
-    let membersList = [...mList, ...ftList, ...nbList];
+    let membersList = dedupePeople([...mList, ...ftList, ...nbList]);
 
     if (profile!.role === 'shepherd') {
       const bacentaNames = (profile!.bacentas || []).map((b) => b.name).filter(Boolean);
