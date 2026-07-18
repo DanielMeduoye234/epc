@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Branch } from '@/lib/types';
 import { DEMO_BRANCHES, DEMO_BRANCH_STATS } from '@/lib/demo-data';
+import { getCached, setCached } from '@/lib/query-cache';
 import { Building2, Users, UserPlus, TrendingUp, Award, BarChart3 } from 'lucide-react';
 
 type BranchStat = {
@@ -15,6 +16,11 @@ type BranchStat = {
   attendance: number;
   shepherds: number;
 };
+
+interface PageSnapshot {
+  branches: Branch[];
+  stats: Record<string, BranchStat>;
+}
 
 export default function BranchesPage() {
   const { profile, isDemo } = useAuth();
@@ -30,34 +36,53 @@ export default function BranchesPage() {
         setStats(DEMO_BRANCH_STATS);
         setLoading(false);
       } else {
+        const cached = getCached<PageSnapshot>('branches-overview');
+        if (cached) {
+          setBranches(cached.branches);
+          setStats(cached.stats);
+          setLoading(false);
+        }
         fetchBranches();
       }
     }
   }, [profile, isDemo]);
 
   async function fetchBranches() {
-    const { data: branchData } = await supabase.from('branches').select('*').order('name');
-    const branchList: Branch[] = branchData || [];
-    setBranches(branchList);
+    // One query per table (each returning just branch_id) instead of four
+    // count queries per branch, then aggregate client-side.
+    const [branchRes, mRes, nbRes, ftRes, shRes] = await Promise.all([
+      supabase.from('branches').select('*').order('name'),
+      supabase.from('members').select('branch_id'),
+      supabase.from('new_believers').select('branch_id'),
+      supabase.from('first_timers').select('branch_id').eq('status', 'first_timer'),
+      supabase.from('profiles').select('branch_id').eq('role', 'shepherd'),
+    ]);
+    const branchList: Branch[] = branchRes.data || [];
+
+    const tally = (rows: { branch_id: string }[] | null) => {
+      const counts: Record<string, number> = {};
+      (rows || []).forEach((r) => { counts[r.branch_id] = (counts[r.branch_id] || 0) + 1; });
+      return counts;
+    };
+    const memberCounts = tally(mRes.data);
+    const nbCounts = tally(nbRes.data);
+    const ftCounts = tally(ftRes.data);
+    const shCounts = tally(shRes.data);
 
     const branchStats: Record<string, BranchStat> = {};
     for (const b of branchList) {
-      const [mRes, nbRes, ftRes, shRes] = await Promise.all([
-        supabase.from('members').select('id', { count: 'exact', head: true }).eq('branch_id', b.id),
-        supabase.from('new_believers').select('id', { count: 'exact', head: true }).eq('branch_id', b.id),
-        supabase.from('first_timers').select('id', { count: 'exact', head: true }).eq('branch_id', b.id).eq('status', 'first_timer'),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('branch_id', b.id).eq('role', 'shepherd'),
-      ]);
       branchStats[b.id] = {
         pastor: 'Pastor',
-        members: mRes.count || 0,
-        newBelievers: nbRes.count || 0,
-        firstTimers: ftRes.count || 0,
+        members: memberCounts[b.id] || 0,
+        newBelievers: nbCounts[b.id] || 0,
+        firstTimers: ftCounts[b.id] || 0,
         attendance: 75,
-        shepherds: shRes.count || 0,
+        shepherds: shCounts[b.id] || 0,
       };
     }
+    setBranches(branchList);
     setStats(branchStats);
+    setCached('branches-overview', { branches: branchList, stats: branchStats } satisfies PageSnapshot);
     setLoading(false);
   }
 

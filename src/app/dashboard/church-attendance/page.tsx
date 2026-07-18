@@ -3,16 +3,18 @@
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Member, Bacenta, FirstTimer, NewBeliever } from '@/lib/types';
+import { Bacenta, FirstTimer, NewBeliever } from '@/lib/types';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
 } from 'recharts';
 import {
   Users, Plus, X, Search, BarChart3, Grid3X3, CalendarDays,
-  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree,
+  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, AlertCircle,
 } from 'lucide-react';
 import React from 'react';
 import BacentaSelect from '@/components/BacentaSelect';
+import BranchQRCode from '@/components/BranchQRCode';
+import { getCached, setCached } from '@/lib/query-cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type ExistingMemberRow = { first_timer_id: string | null; full_name: string; phone_number: string };
@@ -159,6 +161,15 @@ interface WeeklyFirstTimerPoint {
   count: number;
 }
 
+// Snapshot cached for instant rendering on revisits (see lib/query-cache).
+interface PageSnapshot {
+  members: TrackedPerson[];
+  bacentas: Bacenta[];
+  weeklyAttendance: WeeklyAttendancePoint[];
+  weeklyFirstTimers: WeeklyFirstTimerPoint[];
+  branchName: string;
+}
+
 function getWeekStartKey(dateStr: string): string {
   const date = new Date(dateStr);
   const weekStart = new Date(date);
@@ -177,6 +188,7 @@ export default function ChurchAttendancePage() {
 
   const [tab, setTab] = useState<Tab>('overview');
   const [members, setMembers] = useState<TrackedPerson[]>([]);
+  const [branchName, setBranchName] = useState('');
   const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [weeklyAttendance, setWeeklyAttendance] = useState<WeeklyAttendancePoint[]>([]);
   const [weeklyFirstTimers, setWeeklyFirstTimers] = useState<WeeklyFirstTimerPoint[]>([]);
@@ -190,6 +202,7 @@ export default function ChurchAttendancePage() {
     full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '', is_first_timer: false,
   });
   const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
 
   // Bacenta management state
   const [showBacentaModal, setShowBacentaModal] = useState(false);
@@ -209,31 +222,47 @@ export default function ChurchAttendancePage() {
   const [attendanceError, setAttendanceError] = useState('');
   const [showSundayRecords, setShowSundayRecords] = useState(false);
 
-  useEffect(() => { if (profile) fetchData(); }, [profile]);
+  useEffect(() => {
+    if (!profile) return;
+    // Render the cached snapshot immediately (no spinner), then refresh in the
+    // background so the data on screen is always brought up to date.
+    const cached = getCached<PageSnapshot>(`church-attendance:${profile.branch_id}`);
+    if (cached) {
+      applySnapshot(cached);
+      setLoading(false);
+    }
+    fetchData(!cached);
+  }, [profile]);
 
   useEffect(() => {
     if ((tab === 'tracker' || tab === 'records') && members.length > 0) fetchTrackerAttendance();
   }, [tab, trackerYear, trackerMonth, members]);
 
-  async function fetchData() {
-    setLoading(true);
+  function applySnapshot(snap: PageSnapshot) {
+    setMembers(snap.members);
+    setBacentas(snap.bacentas);
+    setWeeklyAttendance(snap.weeklyAttendance);
+    setWeeklyFirstTimers(snap.weeklyFirstTimers);
+    setBranchName(snap.branchName);
+  }
+
+  async function fetchData(showSpinner = true) {
+    if (showSpinner) setLoading(true);
     const eightWeeksAgo = new Date();
     eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
     const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
 
-    const [mRes, bRes, attendanceRes, firstTimersRes] = await Promise.all([
-      supabase.from('members').select('*').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
+    const [mRes, bRes, attendanceRes, firstTimersRes, branchRes] = await Promise.all([
+      supabase.from('members').select('id, full_name, phone_number, bacenta, status').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
       supabase.from('bacentas').select('*').eq('branch_id', profile!.branch_id).order('name'),
       supabase.from('attendance').select('date, is_present').eq('branch_id', profile!.branch_id).gte('date', weeklyStartDate),
       supabase.from('first_timers').select('date_joined').eq('branch_id', profile!.branch_id).gte('date_joined', weeklyStartDate),
+      supabase.from('branches').select('name').eq('id', profile!.branch_id).maybeSingle(),
     ]);
 
     // Only regular members are tracked here — the members table is the single
     // source of truth so counts match the Regular Members page and dashboard.
-    const mList: TrackedPerson[] = ((mRes.data || []) as Member[]).map((x) => ({ ...x, person_type: 'member' as const }));
-
-    setMembers(mList);
-    setBacentas(bRes.data || []);
+    const mList: TrackedPerson[] = ((mRes.data || []) as Omit<TrackedPerson, 'person_type'>[]).map((x) => ({ ...x, person_type: 'member' as const }));
 
     const weekSeed: Record<string, WeeklyAttendancePoint> = {};
     for (let i = 7; i >= 0; i--) {
@@ -257,7 +286,6 @@ export default function ChurchAttendancePage() {
         attendanceRate: total > 0 ? Math.round((entry.present / total) * 100) : 0,
       };
     });
-    setWeeklyAttendance(attendanceSeries);
 
     const firstTimerSeed: Record<string, WeeklyFirstTimerPoint> = {};
     Object.keys(weekSeed).forEach((key) => {
@@ -268,7 +296,16 @@ export default function ChurchAttendancePage() {
       const weekKey = getWeekStartKey(row.date_joined);
       if (firstTimerSeed[weekKey]) firstTimerSeed[weekKey].count += 1;
     });
-    setWeeklyFirstTimers(Object.values(firstTimerSeed));
+
+    const snapshot: PageSnapshot = {
+      members: mList,
+      bacentas: bRes.data || [],
+      weeklyAttendance: attendanceSeries,
+      weeklyFirstTimers: Object.values(firstTimerSeed),
+      branchName: branchRes.data?.name || 'This Branch',
+    };
+    applySnapshot(snapshot);
+    setCached(`church-attendance:${profile!.branch_id}`, snapshot);
 
     setLoading(false);
   }
@@ -277,10 +314,12 @@ export default function ChurchAttendancePage() {
     setLoadingAtt(true);
     const startDate = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-01`;
     const endDate = `${trackerYear}-12-31`;
+    // Filter on the indexed branch_id column instead of shipping every member
+    // id in the request URL — much faster once the member list grows.
     const { data } = await supabase
       .from('attendance')
       .select('person_id, date, is_present')
-      .in('person_id', members.map((m) => m.id))
+      .eq('branch_id', profile!.branch_id)
       .gte('date', startDate)
       .lte('date', endDate);
 
@@ -367,11 +406,28 @@ export default function ChurchAttendancePage() {
 
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
-    if (!addForm.full_name || !addForm.phone_number) return;
+    const trimmedName = addForm.full_name.trim();
+    if (!trimmedName || !addForm.phone_number) return;
+    if (duplicateMember) return;
     setAdding(true);
+    setAddError('');
+
+    // Re-check against the database right before inserting, in case another
+    // device registered the same name after this page was loaded.
+    const { data: existingRows } = await supabase
+      .from('members')
+      .select('full_name')
+      .eq('branch_id', profile!.branch_id);
+    const nameKey = trimmedName.toLowerCase();
+    if ((existingRows || []).some((r: { full_name: string }) => r.full_name.trim().toLowerCase() === nameKey)) {
+      setAddError(`"${trimmedName}" is already registered as a member of this branch.`);
+      setAdding(false);
+      return;
+    }
+
     const today = new Date().toISOString().split('T')[0];
     await supabase.from('members').insert({
-      full_name: addForm.full_name,
+      full_name: trimmedName,
       phone_number: addForm.phone_number,
       address: addForm.address || '',
       bacenta: addForm.bacenta || 'Unassigned',
@@ -383,7 +439,7 @@ export default function ChurchAttendancePage() {
     });
     if (addForm.is_first_timer) {
       await supabase.from('first_timers').insert({
-        full_name: addForm.full_name,
+        full_name: trimmedName,
         phone_number: addForm.phone_number,
         address: addForm.address || '',
         bacenta: addForm.bacenta || 'Unassigned',
@@ -414,6 +470,13 @@ export default function ChurchAttendancePage() {
     setAddingBacenta(false);
     fetchData();
   }
+
+  // Live duplicate check while typing in the Add Member modal.
+  const duplicateMember = useMemo(() => {
+    const name = addForm.full_name.trim().toLowerCase();
+    if (!name) return null;
+    return members.find((m) => m.full_name.trim().toLowerCase() === name) || null;
+  }, [members, addForm.full_name]);
 
   const allBacentas = useMemo(() => {
     const s = new Set(members.map(m => m.bacenta).filter(Boolean));
@@ -531,7 +594,7 @@ export default function ChurchAttendancePage() {
           <p className="text-gray-500 mt-1">Bacenta overview, membership & attendance tracker</p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => { setAddError(''); setShowAddModal(true); }}
           className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
         >
           <Plus size={18} />
@@ -639,6 +702,9 @@ export default function ChurchAttendancePage() {
               </div>
             )}
           </div>
+
+          {/* Branch Registration QR Code */}
+          <BranchQRCode branchId={profile!.branch_id} branchName={branchName} />
 
           {/* Bar Chart */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -1048,11 +1114,16 @@ export default function ChurchAttendancePage() {
             <>
               {/* Cumulative summary cards */}
               {(() => {
-                const totalPresent = sundayRecords.reduce((s, r) => s + r.present, 0);
-                const totalAbsent = sundayRecords.reduce((s, r) => s + r.absent, 0);
+                // Averages are per recorded Sunday: the same members attend each
+                // week, so summing them across Sundays would double-count people.
+                const recorded = sundayRecords.filter((r) => r.total > 0);
+                const recordedSundays = recorded.length;
+                const totalPresent = recorded.reduce((s, r) => s + r.present, 0);
+                const totalAbsent = recorded.reduce((s, r) => s + r.absent, 0);
                 const totalMarked = totalPresent + totalAbsent;
+                const avgPresent = recordedSundays > 0 ? Math.round(totalPresent / recordedSundays) : 0;
+                const avgAbsent = recordedSundays > 0 ? Math.round(totalAbsent / recordedSundays) : 0;
                 const avgRate = totalMarked > 0 ? Math.round((totalPresent / totalMarked) * 100) : 0;
-                const recordedSundays = sundayRecords.filter((r) => r.total > 0).length;
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -1060,12 +1131,12 @@ export default function ChurchAttendancePage() {
                       <p className="text-2xl font-bold text-black">{recordedSundays}<span className="text-sm text-gray-400 font-normal"> / {sundayRecords.length}</span></p>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                      <p className="text-[10px] text-gray-500 uppercase">Total Present</p>
-                      <p className="text-2xl font-bold text-green-600">{totalPresent}</p>
+                      <p className="text-[10px] text-gray-500 uppercase">Avg Present / Sunday</p>
+                      <p className="text-2xl font-bold text-green-600">{avgPresent}</p>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                      <p className="text-[10px] text-gray-500 uppercase">Total Absent</p>
-                      <p className="text-2xl font-bold text-red-500">{totalAbsent}</p>
+                      <p className="text-[10px] text-gray-500 uppercase">Avg Absent / Sunday</p>
+                      <p className="text-2xl font-bold text-red-500">{avgAbsent}</p>
                     </div>
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                       <p className="text-[10px] text-gray-500 uppercase">Avg Attendance Rate</p>
@@ -1082,7 +1153,7 @@ export default function ChurchAttendancePage() {
                     Sunday-by-Sunday Record — {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
                     {trackerBacenta !== 'all' && <span className="text-gray-400 font-normal"> · {trackerBacenta}</span>}
                   </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">All attendance saved for each Sunday in the month, with running totals.</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Attendance saved for each Sunday in the month, with the change from the previous recorded Sunday.</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -1093,20 +1164,24 @@ export default function ChurchAttendancePage() {
                         <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Absent</th>
                         <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Total Marked</th>
                         <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Rate</th>
-                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Cumulative Present</th>
+                        <th className="text-right px-5 py-3 text-xs font-semibold text-gray-600 uppercase">Change vs Prev Sunday</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {(() => {
-                        let running = 0;
+                        // Week-over-week movement in headcount — the same people
+                        // attend each Sunday, so a running sum would double-count.
+                        let prevPresent: number | null = null;
                         return sundayRecords.map((record) => {
-                          running += record.present;
+                          const isRecorded = record.total > 0;
+                          const change = isRecorded && prevPresent !== null ? record.present - prevPresent : null;
+                          if (isRecorded) prevPresent = record.present;
                           return (
                             <tr key={record.dayKey} className="hover:bg-orange-50/30 transition">
                               <td className="px-5 py-3 text-sm font-medium text-black">{record.label}</td>
-                              <td className="px-5 py-3 text-sm text-green-700 text-right font-semibold">{record.present}</td>
-                              <td className="px-5 py-3 text-sm text-red-600 text-right font-semibold">{record.absent}</td>
-                              <td className="px-5 py-3 text-sm text-gray-600 text-right">{record.total}</td>
+                              <td className="px-5 py-3 text-sm text-green-700 text-right font-semibold">{isRecorded ? record.present : '—'}</td>
+                              <td className="px-5 py-3 text-sm text-red-600 text-right font-semibold">{isRecorded ? record.absent : '—'}</td>
+                              <td className="px-5 py-3 text-sm text-gray-600 text-right">{isRecorded ? record.total : '—'}</td>
                               <td className="px-5 py-3 text-right">
                                 <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${
                                   record.total === 0 ? 'bg-gray-100 text-gray-500' :
@@ -1116,7 +1191,17 @@ export default function ChurchAttendancePage() {
                                   {record.total === 0 ? '—' : `${record.attendanceRate}%`}
                                 </span>
                               </td>
-                              <td className="px-5 py-3 text-sm text-black text-right font-bold">{running}</td>
+                              <td className="px-5 py-3 text-right">
+                                {change === null ? (
+                                  <span className="text-sm text-gray-400">—</span>
+                                ) : (
+                                  <span className={`text-sm font-bold ${
+                                    change > 0 ? 'text-green-600' : change < 0 ? 'text-red-500' : 'text-gray-500'
+                                  }`}>
+                                    {change > 0 ? `▲ +${change}` : change < 0 ? `▼ ${change}` : '±0'}
+                                  </span>
+                                )}
+                              </td>
                             </tr>
                           );
                         });
@@ -1125,18 +1210,31 @@ export default function ChurchAttendancePage() {
                         <tr><td colSpan={6} className="text-center py-10 text-gray-400 text-sm">No Sundays in this month</td></tr>
                       )}
                     </tbody>
-                    {sundayRecords.length > 0 && (
-                      <tfoot>
-                        <tr className="bg-gray-50 border-t border-gray-200">
-                          <td className="px-5 py-3 text-sm font-bold text-black">Month Total</td>
-                          <td className="px-5 py-3 text-sm text-green-700 text-right font-bold">{sundayRecords.reduce((s, r) => s + r.present, 0)}</td>
-                          <td className="px-5 py-3 text-sm text-red-600 text-right font-bold">{sundayRecords.reduce((s, r) => s + r.absent, 0)}</td>
-                          <td className="px-5 py-3 text-sm text-gray-700 text-right font-bold">{sundayRecords.reduce((s, r) => s + r.total, 0)}</td>
-                          <td className="px-5 py-3" />
-                          <td className="px-5 py-3 text-sm text-black text-right font-bold">{sundayRecords.reduce((s, r) => s + r.present, 0)}</td>
-                        </tr>
-                      </tfoot>
-                    )}
+                    {sundayRecords.length > 0 && (() => {
+                      const recorded = sundayRecords.filter((r) => r.total > 0);
+                      const n = recorded.length;
+                      const avg = (fn: (r: typeof recorded[number]) => number) =>
+                        n > 0 ? Math.round(recorded.reduce((s, r) => s + fn(r), 0) / n) : 0;
+                      const totalPresent = recorded.reduce((s, r) => s + r.present, 0);
+                      const totalMarked = recorded.reduce((s, r) => s + r.total, 0);
+                      const monthRate = totalMarked > 0 ? Math.round((totalPresent / totalMarked) * 100) : 0;
+                      return (
+                        <tfoot>
+                          <tr className="bg-gray-50 border-t border-gray-200">
+                            <td className="px-5 py-3 text-sm font-bold text-black">Average per Sunday</td>
+                            <td className="px-5 py-3 text-sm text-green-700 text-right font-bold">{avg((r) => r.present)}</td>
+                            <td className="px-5 py-3 text-sm text-red-600 text-right font-bold">{avg((r) => r.absent)}</td>
+                            <td className="px-5 py-3 text-sm text-gray-700 text-right font-bold">{avg((r) => r.total)}</td>
+                            <td className="px-5 py-3 text-right">
+                              <span className="inline-block px-2 py-0.5 text-xs rounded-full font-bold bg-orange-100 text-orange-700">
+                                {n === 0 ? '—' : `${monthRate}%`}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3" />
+                          </tr>
+                        </tfoot>
+                      );
+                    })()}
                   </table>
                 </div>
               </div>
@@ -1162,10 +1260,23 @@ export default function ChurchAttendancePage() {
                   required
                   type="text"
                   value={addForm.full_name}
-                  onChange={e => setAddForm(p => ({ ...p, full_name: e.target.value }))}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-black text-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                  onChange={e => { setAddError(''); setAddForm(p => ({ ...p, full_name: e.target.value })); }}
+                  className={`w-full px-4 py-2.5 border rounded-lg text-black text-sm focus:ring-2 outline-none ${
+                    duplicateMember
+                      ? 'border-red-300 bg-red-50/50 focus:ring-red-400'
+                      : 'border-gray-200 focus:ring-orange-500'
+                  }`}
                   placeholder="e.g. John Akpan"
                 />
+                {duplicateMember && (
+                  <p className="flex items-start gap-1.5 mt-1.5 text-xs text-red-600">
+                    <AlertCircle size={14} className="mt-px shrink-0" />
+                    <span>
+                      <span className="font-semibold">{duplicateMember.full_name}</span> already exists
+                      in <span className="font-semibold">{duplicateMember.bacenta}</span>. Duplicate names are not allowed.
+                    </span>
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number *</label>
@@ -1220,12 +1331,18 @@ export default function ChurchAttendancePage() {
                   <span className="block text-xs text-gray-500 mt-0.5">Will also appear on the First Timers page</span>
                 </div>
               </label>
+              {addError && (
+                <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  {addError}
+                </div>
+              )}
               <button
                 type="submit"
-                disabled={adding}
-                className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50"
+                disabled={adding || !!duplicateMember}
+                className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {adding ? 'Adding...' : 'Add Member'}
+                {adding ? 'Adding...' : duplicateMember ? 'Name Already Exists' : 'Add Member'}
               </button>
             </form>
           </div>
