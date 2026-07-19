@@ -207,6 +207,7 @@ export default function ChurchAttendancePage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState('');
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const promotionCheckRunning = useRef(false);
 
   // Bacenta management state
   const [showBacentaModal, setShowBacentaModal] = useState(false);
@@ -238,9 +239,12 @@ export default function ChurchAttendancePage() {
     fetchData(!cached);
   }, [profile]);
 
+  // Note: deliberately not keyed on `members` — the attendance query filters by
+  // branch, and re-running this after every background member refresh would
+  // flash the tracker list while marking attendance.
   useEffect(() => {
-    if ((tab === 'tracker' || tab === 'records') && members.length > 0) fetchTrackerAttendance();
-  }, [tab, trackerYear, trackerMonth, members]);
+    if (tab === 'tracker' || tab === 'records') fetchTrackerAttendance();
+  }, [tab, trackerYear, trackerMonth]);
 
   function applySnapshot(snap: PageSnapshot) {
     setMembers(snap.members);
@@ -378,9 +382,15 @@ export default function ChurchAttendancePage() {
           { onConflict: 'person_id,date,person_type' }
         );
 
-    if (!error && newVal === true) {
-      await checkAndPromoteIndividuals(supabase, profile!.branch_id);
-      fetchData();
+    if (!error && newVal === true && !promotionCheckRunning.current) {
+      // Run the promotion check and data refresh in the background, without a
+      // loading spinner — marking attendance must feel instant. The optimistic
+      // attendanceMap update above already reflects the change on screen.
+      promotionCheckRunning.current = true;
+      checkAndPromoteIndividuals(supabase, profile!.branch_id)
+        .then(() => fetchData(false))
+        .catch(() => {})
+        .finally(() => { promotionCheckRunning.current = false; });
     }
 
     if (error) {
