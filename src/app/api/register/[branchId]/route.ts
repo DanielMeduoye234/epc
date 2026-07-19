@@ -1,34 +1,9 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
 
+import { uploadMemberPhoto, MAX_PHOTO_BYTES } from '@/lib/photo-storage';
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const PHOTO_BUCKET = 'member-photos';
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-
-// Uploads the registrant's photo to storage and returns its public URL.
-// Creates the bucket on first use. Returns null on failure — a photo problem
-// should never block the registration itself.
-async function uploadPhoto(
-  admin: ReturnType<typeof createAdminClient>,
-  branchId: string,
-  photo: File
-): Promise<string | null> {
-  if (!photo.type.startsWith('image/') || photo.size === 0 || photo.size > MAX_PHOTO_BYTES) {
-    return null;
-  }
-  const ext = photo.type === 'image/png' ? 'png' : photo.type === 'image/webp' ? 'webp' : 'jpg';
-  const path = `${branchId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const bytes = await photo.arrayBuffer();
-
-  let { error } = await admin.storage.from(PHOTO_BUCKET).upload(path, bytes, { contentType: photo.type });
-  if (error) {
-    await admin.storage.createBucket(PHOTO_BUCKET, { public: true, fileSizeLimit: MAX_PHOTO_BYTES }).catch(() => {});
-    ({ error } = await admin.storage.from(PHOTO_BUCKET).upload(path, bytes, { contentType: photo.type }));
-  }
-  if (error) return null;
-  return admin.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
-}
 
 // Public endpoint: returns the branch name and its bacentas so the QR
 // registration form can render without authentication.
@@ -149,7 +124,7 @@ export async function POST(
     return NextResponse.json({ error: reason }, { status: 409 });
   }
 
-  const photoUrl = photo ? await uploadPhoto(admin, branchId, photo) : null;
+  const photoUrl = photo ? await uploadMemberPhoto(admin, branchId, photo) : null;
 
   const today = new Date().toISOString().split('T')[0];
   const { error: insertError } = await admin.from('members').insert({

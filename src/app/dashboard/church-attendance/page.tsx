@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Bacenta, FirstTimer, NewBeliever } from '@/lib/types';
@@ -9,8 +9,9 @@ import {
 } from 'recharts';
 import {
   Users, Plus, X, Search, BarChart3, Grid3X3, CalendarDays,
-  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, AlertCircle,
+  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, AlertCircle, Camera,
 } from 'lucide-react';
+import { downscalePhoto } from '@/lib/photos';
 import React from 'react';
 import BacentaSelect from '@/components/BacentaSelect';
 import BranchQRCode from '@/components/BranchQRCode';
@@ -203,6 +204,9 @@ export default function ChurchAttendancePage() {
   });
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Bacenta management state
   const [showBacentaModal, setShowBacentaModal] = useState(false);
@@ -404,6 +408,27 @@ export default function ChurchAttendancePage() {
     );
   }
 
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setAddError('Please choose an image file for the photo.');
+      return;
+    }
+    setAddError('');
+    const resized = await downscalePhoto(file);
+    setPhotoFile(resized);
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhotoPreview(URL.createObjectURL(resized));
+  }
+
+  function removePhoto() {
+    setPhotoFile(null);
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhotoPreview('');
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  }
+
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
     const trimmedName = addForm.full_name.trim();
@@ -425,6 +450,20 @@ export default function ChurchAttendancePage() {
       return;
     }
 
+    // Upload the photo first (if any). A failed upload never blocks the
+    // member from being added.
+    let photoUrl: string | null = null;
+    if (photoFile) {
+      try {
+        const fd = new FormData();
+        fd.append('photo', photoFile);
+        const res = await fetch('/api/upload-photo', { method: 'POST', body: fd });
+        if (res.ok) photoUrl = (await res.json()).url || null;
+      } catch {
+        photoUrl = null;
+      }
+    }
+
     const today = new Date().toISOString().split('T')[0];
     await supabase.from('members').insert({
       full_name: trimmedName,
@@ -436,6 +475,7 @@ export default function ChurchAttendancePage() {
       membership_date: today,
       branch_id: profile!.branch_id,
       status: 'active',
+      photo_url: photoUrl,
     });
     if (addForm.is_first_timer) {
       await supabase.from('first_timers').insert({
@@ -447,9 +487,11 @@ export default function ChurchAttendancePage() {
         date_joined: today,
         branch_id: profile!.branch_id,
         status: 'first_timer',
+        photo_url: photoUrl,
       });
     }
     setAddForm({ full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '', is_first_timer: false });
+    removePhoto();
     setShowAddModal(false);
     setAdding(false);
     fetchData();
@@ -1249,7 +1291,7 @@ export default function ChurchAttendancePage() {
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h2 className="text-lg font-bold text-black">Add Member</h2>
-              <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition">
+              <button onClick={() => { removePhoto(); setShowAddModal(false); }} className="p-2 hover:bg-gray-100 rounded-lg transition">
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
@@ -1318,6 +1360,52 @@ export default function ChurchAttendancePage() {
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-black text-sm focus:ring-2 focus:ring-orange-500 outline-none"
                   placeholder="Name of person"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Photo <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoChange}
+                  className="hidden"
+                />
+                {photoPreview ? (
+                  <div className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={photoPreview}
+                      alt="Member photo"
+                      className="w-16 h-16 rounded-full object-cover border-2 border-orange-200"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => photoInputRef.current?.click()}
+                        className="px-3 py-1.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg transition"
+                      >
+                        Change
+                      </button>
+                      <button
+                        type="button"
+                        onClick={removePhoto}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 hover:bg-gray-100 rounded-lg transition"
+                      >
+                        <X size={12} />
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-lg text-sm text-gray-500 hover:border-orange-300 hover:text-orange-600 transition"
+                  >
+                    <Camera size={18} />
+                    Take or upload a photo
+                  </button>
+                )}
               </div>
               <label className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100 cursor-pointer">
                 <input
