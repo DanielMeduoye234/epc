@@ -441,22 +441,25 @@ DROP POLICY IF EXISTS "Users can view attendance in their branch" ON attendance;
 DROP POLICY IF EXISTS "Shepherds and above can add attendance" ON attendance;
 DROP POLICY IF EXISTS "Shepherds and above can update attendance" ON attendance;
 DROP POLICY IF EXISTS "Shepherds and above can delete attendance" ON attendance;
+DROP POLICY IF EXISTS "Recorders and above can add attendance" ON attendance;
+DROP POLICY IF EXISTS "Recorders and above can update attendance" ON attendance;
+DROP POLICY IF EXISTS "Recorders and above can delete attendance" ON attendance;
 
 CREATE POLICY "Users can view attendance in their branch"
   ON attendance FOR SELECT
   USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
 
-CREATE POLICY "Shepherds and above can add attendance"
+CREATE POLICY "Recorders and above can add attendance"
   ON attendance FOR INSERT
-  WITH CHECK (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop', 'shepherd'));
+  WITH CHECK (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop', 'shepherd', 'recorder'));
 
-CREATE POLICY "Shepherds and above can update attendance"
+CREATE POLICY "Recorders and above can update attendance"
   ON attendance FOR UPDATE
-  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop', 'shepherd'));
+  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop', 'shepherd', 'recorder'));
 
-CREATE POLICY "Shepherds and above can delete attendance"
+CREATE POLICY "Recorders and above can delete attendance"
   ON attendance FOR DELETE
-  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop', 'shepherd'));
+  USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop', 'shepherd', 'recorder'));
 
 -- ============================================================
 -- POLICIES: FOLLOW-UPS

@@ -53,7 +53,7 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
     for (const ft of firstTimers) {
       const count = ftCounts[ft.id] || 0;
       if (count >= 2 && !existingFtIds.has(ft.id) && !existingNames.has(ft.full_name.toLowerCase().trim())) {
-        await supabase.from('members').insert({
+        const { data: newMem } = await supabase.from('members').insert({
           first_timer_id: ft.id,
           full_name: ft.full_name,
           first_name: ft.first_name,
@@ -68,7 +68,12 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           assigned_shepherd: ft.assigned_shepherd,
           branch_id: ft.branch_id,
           status: 'active'
-        });
+        }).select('id').maybeSingle();
+
+        if (newMem?.id) {
+          await supabase.from('attendance').update({ person_id: newMem.id, person_type: 'member' }).eq('person_id', ft.id);
+        }
+
         await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
       }
     }
@@ -91,7 +96,7 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
       const count = nbCounts[nb.id] || 0;
       const isAlreadyMember = existingNames.has(nb.full_name.toLowerCase().trim()) || (nb.phone_number && existingPhones.has(nb.phone_number.trim()));
       if (count >= 2 && !isAlreadyMember) {
-        await supabase.from('members').insert({
+        const { data: newMem } = await supabase.from('members').insert({
           full_name: nb.full_name,
           address: nb.address,
           bacenta: nb.bacenta,
@@ -102,7 +107,11 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           assigned_shepherd: nb.recorded_by,
           branch_id: nb.branch_id,
           status: 'active'
-        });
+        }).select('id').maybeSingle();
+
+        if (newMem?.id) {
+          await supabase.from('attendance').update({ person_id: newMem.id, person_type: 'member' }).eq('person_id', nb.id);
+        }
       }
     }
   }
@@ -226,6 +235,8 @@ export default function ChurchAttendancePage() {
   const [loadingAtt, setLoadingAtt] = useState(false);
   const [attendanceError, setAttendanceError] = useState('');
   const [showSundayRecords, setShowSundayRecords] = useState(false);
+  const loadedMonthRef = useRef<string>('');
+  const pendingSavesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!profile) return;
@@ -239,11 +250,15 @@ export default function ChurchAttendancePage() {
     fetchData(!cached);
   }, [profile]);
 
-  // Note: deliberately not keyed on `members` — the attendance query filters by
-  // branch, and re-running this after every background member refresh would
-  // flash the tracker list while marking attendance.
+  // Keyed on trackerYear & trackerMonth — switching tabs within the same month
+  // will NOT re-fetch from database and overwrite in-flight optimistic attendance changes.
   useEffect(() => {
-    if (tab === 'tracker' || tab === 'records') fetchTrackerAttendance();
+    if (tab === 'tracker' || tab === 'records') {
+      const monthKey = `${trackerYear}-${trackerMonth}`;
+      if (loadedMonthRef.current !== monthKey) {
+        fetchTrackerAttendance(true);
+      }
+    }
   }, [tab, trackerYear, trackerMonth]);
 
   function applySnapshot(snap: PageSnapshot) {
@@ -318,25 +333,49 @@ export default function ChurchAttendancePage() {
     setLoading(false);
   }
 
-  async function fetchTrackerAttendance() {
+  async function fetchTrackerAttendance(force = false) {
+    const currentMonthKey = `${trackerYear}-${trackerMonth}`;
+    if (!force && loadedMonthRef.current === currentMonthKey && Object.keys(attendanceMap).length > 0) {
+      return;
+    }
     setLoadingAtt(true);
     const startDate = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-01`;
     const endDate = `${trackerYear}-12-31`;
-    // Filter on the indexed branch_id column instead of shipping every member
-    // id in the request URL — much faster once the member list grows.
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('attendance')
       .select('person_id, date, is_present')
       .eq('branch_id', profile!.branch_id)
       .gte('date', startDate)
       .lte('date', endDate);
 
+    if (error) {
+      console.error('Attendance fetch error:', error);
+      setAttendanceError(`Could not load attendance: ${error.message}`);
+      setLoadingAtt(false);
+      return;
+    }
+
     const map: Record<string, Record<string, boolean>> = {};
     data?.forEach((a: { person_id: string; date: string; is_present: boolean }) => {
       if (!map[a.person_id]) map[a.person_id] = {};
       map[a.person_id][a.date] = a.is_present;
     });
-    setAttendanceMap(map);
+
+    // Retain any pending in-flight updates so background refetches don't wipe optimistic state
+    setAttendanceMap(prev => {
+      const merged = { ...map };
+      pendingSavesRef.current.forEach((saveKey) => {
+        const [memId, dateStr] = saveKey.split(':::');
+        if (memId && dateStr && prev[memId] && prev[memId][dateStr] !== undefined) {
+          if (!merged[memId]) merged[memId] = {};
+          merged[memId][dateStr] = prev[memId][dateStr];
+        }
+      });
+      return merged;
+    });
+
+    loadedMonthRef.current = currentMonthKey;
     setLoadingAtt(false);
   }
 
@@ -351,6 +390,10 @@ export default function ChurchAttendancePage() {
       : current === true
       ? false
       : undefined;
+
+    const saveKey = `${memberId}:::${dateStr}`;
+    pendingSavesRef.current.add(saveKey);
+
     setAttendanceError('');
     setAttendanceMap(prev => {
       const updated = { ...prev, [memberId]: { ...(prev[memberId] || {}) } };
@@ -362,15 +405,18 @@ export default function ChurchAttendancePage() {
     const targetMember = members.find(m => m.id === memberId);
     const personType = targetMember?.person_type || 'member';
 
-    const { error } = newVal === undefined
-      ? await supabase
+    let dbError: any = null;
+    try {
+      if (newVal === undefined) {
+        const { error } = await supabase
           .from('attendance')
           .delete()
           .eq('person_id', memberId)
-          .eq('person_type', personType)
           .eq('date', dateStr)
-          .eq('branch_id', profile!.branch_id)
-      : await supabase.from('attendance').upsert(
+          .eq('branch_id', profile!.branch_id);
+        dbError = error;
+      } else {
+        const { error } = await supabase.from('attendance').upsert(
           {
             person_id: memberId,
             person_type: personType,
@@ -382,10 +428,38 @@ export default function ChurchAttendancePage() {
           { onConflict: 'person_id,date,person_type' }
         );
 
-    if (!error && newVal === true && !promotionCheckRunning.current) {
-      // Run the promotion check and data refresh in the background, without a
-      // loading spinner — marking attendance must feel instant. The optimistic
-      // attendanceMap update above already reflects the change on screen.
+        if (error) {
+          // Fallback delete + insert if onConflict constraint mismatch occurs
+          await supabase.from('attendance').delete().eq('person_id', memberId).eq('date', dateStr).eq('branch_id', profile!.branch_id);
+          const { error: insertErr } = await supabase.from('attendance').insert({
+            person_id: memberId,
+            person_type: personType,
+            date: dateStr,
+            is_present: newVal,
+            marked_by: profile!.id,
+            branch_id: profile!.branch_id,
+          });
+          dbError = insertErr;
+        }
+      }
+    } catch (err: any) {
+      dbError = err;
+    } finally {
+      pendingSavesRef.current.delete(saveKey);
+    }
+
+    if (dbError) {
+      setAttendanceMap(prev => {
+        const updated = { ...prev, [memberId]: { ...(prev[memberId] || {}) } };
+        if (current === undefined) delete updated[memberId][dateStr];
+        else updated[memberId][dateStr] = current;
+        return updated;
+      });
+      setAttendanceError(`Attendance was not saved: ${dbError.message || 'Database write failed'}`);
+      return false;
+    }
+
+    if (newVal === true && !promotionCheckRunning.current) {
       promotionCheckRunning.current = true;
       checkAndPromoteIndividuals(supabase, profile!.branch_id)
         .then(() => fetchData(false))
@@ -393,16 +467,6 @@ export default function ChurchAttendancePage() {
         .finally(() => { promotionCheckRunning.current = false; });
     }
 
-    if (error) {
-      setAttendanceMap(prev => {
-        const updated = { ...prev, [memberId]: { ...(prev[memberId] || {}) } };
-        if (current === undefined) delete updated[memberId][dateStr];
-        else updated[memberId][dateStr] = current;
-        return updated;
-      });
-      setAttendanceError(`Attendance was not saved: ${error.message}`);
-      return false;
-    }
     return true;
   }
 
