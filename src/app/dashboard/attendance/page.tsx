@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, @next/next/no-img-element */
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
@@ -14,6 +14,7 @@ import {
   ChevronDown, ChevronUp, Search,
 } from 'lucide-react';
 import React from 'react';
+import { migrateAttendanceHistory } from '@/lib/attendance-integrity';
 
 interface MemberWithHistory extends Member {
   recentWeeks?: boolean[];
@@ -64,8 +65,11 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
   if (firstTimers.length === 0 && newBelievers.length === 0) return;
 
   // Get current members to avoid duplicates
-  const { data: currentMembers } = await supabase.from('members').select('full_name, phone_number, first_timer_id').eq('branch_id', branchId);
-  const memberRows: { first_timer_id: string | null; full_name: string; phone_number: string }[] = currentMembers || [];
+  const { data: currentMembers, error: membersError } = await supabase.from('members').select('id, full_name, phone_number, first_timer_id').eq('branch_id', branchId);
+  if (ftRes.error || nbRes.error || membersError) {
+    throw new Error(ftRes.error?.message || nbRes.error?.message || membersError?.message || 'Promotion data could not be loaded');
+  }
+  const memberRows: { id: string; first_timer_id: string | null; full_name: string; phone_number: string }[] = currentMembers || [];
   const existingFtIds = new Set(memberRows.map((m) => m.first_timer_id).filter(Boolean));
   const existingNames = new Set(memberRows.map((m) => m.full_name.toLowerCase().trim()));
   const existingPhones = new Set(memberRows.map((m) => m.phone_number.trim()).filter(Boolean));
@@ -73,11 +77,12 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
   // 2. Fetch present attendance counts for first timers
   if (firstTimers.length > 0) {
     const ftIds = firstTimers.map(f => f.id);
-    const { data: ftAtt } = await supabase
+    const { data: ftAtt, error: ftAttendanceError } = await supabase
       .from('attendance')
       .select('person_id')
       .in('person_id', ftIds)
       .eq('is_present', true);
+    if (ftAttendanceError) throw new Error(`First-timer attendance could not be checked: ${ftAttendanceError.message}`);
 
     const ftCounts: Record<string, number> = {};
     (ftAtt || []).forEach((a: { person_id: string }) => {
@@ -86,8 +91,20 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
     for (const ft of firstTimers) {
       const count = ftCounts[ft.id] || 0;
+      const existingCandidates = memberRows.filter((member) =>
+        member.first_timer_id === ft.id ||
+        member.full_name.toLowerCase().trim() === ft.full_name.toLowerCase().trim() ||
+        (ft.phone_number && member.phone_number.trim() === ft.phone_number.trim())
+      );
+      if (count >= 2 && existingCandidates.length === 1) {
+        await migrateAttendanceHistory(supabase, ft.id, 'first_timer', existingCandidates[0].id, branchId);
+        const { error: statusError } = await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+        if (statusError) throw new Error(`Attendance was preserved, but promotion status failed: ${statusError.message}`);
+        existingFtIds.add(ft.id);
+        continue;
+      }
       if (count >= 2 && !existingFtIds.has(ft.id) && !existingNames.has(ft.full_name.toLowerCase().trim())) {
-        await supabase.from('members').insert({
+        const { data: newMember, error: memberError } = await supabase.from('members').insert({
           first_timer_id: ft.id,
           full_name: ft.full_name,
           first_name: ft.first_name,
@@ -102,8 +119,22 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           assigned_shepherd: ft.assigned_shepherd,
           branch_id: ft.branch_id,
           status: 'active'
-        });
-        await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+        }).select('id').maybeSingle();
+
+        if (memberError || !newMember?.id) {
+          throw new Error(`First timer could not be promoted: ${memberError?.message || 'member ID was not returned'}`);
+        }
+        if (newMember.id) {
+          // Keep the attendance history attached to the person after their ID
+          // changes during promotion. Only hide the first-timer row after this
+          // succeeds, otherwise a failed migration would make them disappear.
+          await migrateAttendanceHistory(supabase, ft.id, 'first_timer', newMember.id, branchId);
+          const { error: statusError } = await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+          if (statusError) throw new Error(`Attendance was preserved, but promotion status failed: ${statusError.message}`);
+          existingFtIds.add(ft.id);
+          existingNames.add(ft.full_name.toLowerCase().trim());
+          if (ft.phone_number) existingPhones.add(ft.phone_number.trim());
+        }
       }
     }
   }
@@ -111,11 +142,12 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
   // 3. Fetch present attendance counts for new believers
   if (newBelievers.length > 0) {
     const nbIds = newBelievers.map(n => n.id);
-    const { data: nbAtt } = await supabase
+    const { data: nbAtt, error: nbAttendanceError } = await supabase
       .from('attendance')
       .select('person_id')
       .in('person_id', nbIds)
       .eq('is_present', true);
+    if (nbAttendanceError) throw new Error(`New-believer attendance could not be checked: ${nbAttendanceError.message}`);
 
     const nbCounts: Record<string, number> = {};
     (nbAtt || []).forEach((a: { person_id: string }) => {
@@ -124,9 +156,17 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
     for (const nb of newBelievers) {
       const count = nbCounts[nb.id] || 0;
-      const isAlreadyMember = existingNames.has(nb.full_name.toLowerCase().trim()) || (nb.phone_number && existingPhones.has(nb.phone_number.trim()));
+      const existingCandidates = memberRows.filter((member) =>
+        member.full_name.toLowerCase().trim() === nb.full_name.toLowerCase().trim() ||
+        (nb.phone_number && member.phone_number.trim() === nb.phone_number.trim())
+      );
+      const isAlreadyMember = existingCandidates.length > 0;
+      if (count >= 2 && existingCandidates.length === 1) {
+        await migrateAttendanceHistory(supabase, nb.id, 'new_believer', existingCandidates[0].id, branchId);
+        continue;
+      }
       if (count >= 2 && !isAlreadyMember) {
-        await supabase.from('members').insert({
+        const { data: newMember, error: memberError } = await supabase.from('members').insert({
           full_name: nb.full_name,
           address: nb.address,
           bacenta: nb.bacenta,
@@ -137,7 +177,16 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           assigned_shepherd: nb.recorded_by,
           branch_id: nb.branch_id,
           status: 'active'
-        });
+        }).select('id').maybeSingle();
+
+        if (memberError || !newMember?.id) {
+          throw new Error(`New believer could not be promoted: ${memberError?.message || 'member ID was not returned'}`);
+        }
+        if (newMember.id) {
+          await migrateAttendanceHistory(supabase, nb.id, 'new_believer', newMember.id, branchId);
+          existingNames.add(nb.full_name.toLowerCase().trim());
+          if (nb.phone_number) existingPhones.add(nb.phone_number.trim());
+        }
       }
     }
   }
@@ -153,6 +202,8 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [attendanceLoaded, setAttendanceLoaded] = useState(false);
+  const attendanceRequestRef = useRef(0);
   const [shepherdStats, setShepherdStats] = useState<ShepherdStats[]>([]);
   const [shepherdNameMap, setShepherdNameMap] = useState<Record<string, string>>({});
   const [expandedShepherd, setExpandedShepherd] = useState<string | null>(null);
@@ -344,33 +395,39 @@ export default function AttendancePage() {
   }
 
   async function fetchExistingAttendance() {
+    const requestId = ++attendanceRequestRef.current;
+    setAttendanceLoaded(false);
+    setSaveError(false);
     const memberIds = members.map(m => m.id);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('attendance')
       .select('person_id, is_present')
       .in('person_id', memberIds)
+      .eq('branch_id', profile!.branch_id)
       .eq('date', date);
+
+    if (requestId !== attendanceRequestRef.current) return;
+    if (error) {
+      setSaveError(true);
+      return;
+    }
 
     const existing: Record<string, boolean> = {};
     (data || []).forEach((row: { person_id: string; is_present: boolean }) => {
       existing[row.person_id] = row.is_present;
     });
     setAttendance(existing);
+    setAttendanceLoaded(true);
   }
 
   async function handleSave() {
-    if (members.length === 0) return;
+    if (members.length === 0 || !attendanceLoaded) return;
     setSaving(true);
     setSaved(false);
     setSaveError(false);
-    const memberIds = members.map(m => m.id);
-    const { error: delError } = await supabase.from('attendance').delete().in('person_id', memberIds).eq('date', date);
-    if (delError) {
-      setSaving(false);
-      setSaveError(true);
-      return;
-    }
-    const { error: insError } = await supabase.from('attendance').insert(
+    // One PostgreSQL statement is atomic. The former delete-then-insert flow
+    // permanently erased the day when the second request failed.
+    const { error: saveErrorResult } = await supabase.from('attendance').upsert(
       members.map(m => ({
         person_id: m.id,
         person_type: m.person_type,
@@ -378,10 +435,11 @@ export default function AttendancePage() {
         is_present: attendance[m.id] ?? false,
         marked_by: profile!.id,
         branch_id: profile!.branch_id,
-      }))
+      })),
+      { onConflict: 'person_id,date,person_type' }
     );
     setSaving(false);
-    if (!insError) {
+    if (!saveErrorResult) {
       setSaved(true);
       if (!isDemo) {
         await checkAndPromoteIndividuals(supabase, profile!.branch_id);
@@ -393,7 +451,17 @@ export default function AttendancePage() {
   }
 
   const toggleAttendance = (memberId: string) => {
+    if (!attendanceLoaded || saving) return;
     setAttendance(prev => ({ ...prev, [memberId]: !prev[memberId] }));
+  };
+
+  const changeAttendanceDate = (nextDate: string) => {
+    attendanceRequestRef.current += 1;
+    setDate(nextDate);
+    setAttendance({});
+    setAttendanceLoaded(false);
+    setSaved(false);
+    setSaveError(false);
   };
 
   const presentCount = Object.values(attendance).filter(Boolean).length;
@@ -650,7 +718,7 @@ export default function AttendancePage() {
           <input
             type="date"
             value={date}
-            onChange={e => setDate(e.target.value)}
+            onChange={e => changeAttendanceDate(e.target.value)}
             className="px-4 py-2.5 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
           />
         </div>
@@ -663,7 +731,9 @@ export default function AttendancePage() {
       )}
       {saveError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-          Failed to save attendance. Please try again.
+          {attendanceLoaded
+            ? 'Failed to save attendance. Your existing records were not deleted; please try again.'
+            : 'Could not load attendance for this date. Nothing can be saved until the records load successfully.'}
         </div>
       )}
 
@@ -786,9 +856,12 @@ export default function AttendancePage() {
                                 faith === 'at-risk' ? 'border-l-amber-400' :
                                 faith === 'lost' ? 'border-l-red-400' : 'border-l-gray-200';
             return (
-              <div
+              <button
+                type="button"
                 key={member.id}
-                className={`flex items-center justify-between px-4 sm:px-6 py-4 transition border-l-4 ${borderAccent}`}
+                onClick={() => toggleAttendance(member.id)}
+                disabled={!attendanceLoaded || saving}
+                className={`w-full flex items-center justify-between px-4 sm:px-6 py-4 text-left transition border-l-4 ${borderAccent} disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 <div className="flex items-center gap-3 sm:gap-4">
                   <div className="w-10 h-10 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
@@ -823,7 +896,7 @@ export default function AttendancePage() {
                 >
                   {attendance[member.id] ? '✓' : '✗'}
                 </div>
-              </div>
+              </button>
             );
           })}
           {filteredMembers.length === 0 && (
@@ -832,6 +905,18 @@ export default function AttendancePage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !attendanceLoaded || members.length === 0}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-orange-500 text-white font-medium hover:bg-orange-600 transition disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Save size={17} />
+          {saving ? 'Saving...' : attendanceLoaded ? 'Save Attendance' : 'Loading Attendance...'}
+        </button>
       </div>
     </div>
   );

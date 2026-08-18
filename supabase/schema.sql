@@ -597,34 +597,6 @@ CREATE INDEX IF NOT EXISTS idx_prayer_schedules_branch ON prayer_schedules(branc
 CREATE INDEX IF NOT EXISTS idx_prayer_schedules_active ON prayer_schedules(day_of_week, time) WHERE is_active = TRUE;
 
 -- ============================================================
--- FUNCTION: Auto-promote First Timers to Members
--- ============================================================
-CREATE OR REPLACE FUNCTION promote_first_timers_to_members()
-RETURNS void AS $$
-DECLARE
-  ft RECORD;
-  att_count INT;
-BEGIN
-  FOR ft IN
-    SELECT * FROM first_timers WHERE status = 'first_timer'
-  LOOP
-    SELECT COUNT(*) INTO att_count
-    FROM attendance
-    WHERE person_id = ft.id
-      AND person_type = 'first_timer'
-      AND is_present = TRUE;
-
-    IF att_count >= 3 THEN
-      INSERT INTO members (first_timer_id, full_name, address, bacenta, phone_number, who_brought, date_joined, membership_date, assigned_shepherd, branch_id, status)
-      VALUES (ft.id, ft.full_name, ft.address, ft.bacenta, ft.phone_number, ft.who_brought, ft.date_joined, CURRENT_DATE, ft.assigned_shepherd, ft.branch_id, 'active');
-
-      UPDATE first_timers SET status = 'member', promoted_at = NOW() WHERE id = ft.id;
-    END IF;
-  END LOOP;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- ============================================================
 -- FUNCTION: Flag Inactive Members (no attendance in 14 days)
 -- ============================================================
 CREATE OR REPLACE FUNCTION flag_inactive_members()
@@ -648,6 +620,23 @@ BEGIN
   END LOOP;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Repair histories left on a first-timer ID by older promotion code. Copy
+-- first so a conflict or interruption can never delete the only record. If
+-- both IDs already have the same service date, preserve a present mark.
+INSERT INTO attendance (person_id, person_type, date, is_present, marked_by, branch_id, created_at)
+SELECT m.id, 'member'::person_type, a.date, a.is_present, a.marked_by, a.branch_id, a.created_at
+FROM attendance a
+JOIN members m ON m.first_timer_id = a.person_id
+WHERE a.person_type = 'first_timer'
+ON CONFLICT (person_id, date, person_type) DO UPDATE
+SET is_present = attendance.is_present OR EXCLUDED.is_present,
+    marked_by = COALESCE(EXCLUDED.marked_by, attendance.marked_by);
+
+DELETE FROM attendance a
+USING members m
+WHERE m.first_timer_id = a.person_id
+  AND a.person_type = 'first_timer';
 
 -- ============================================================
 -- FUNCTION: Generate Birthday Alerts
@@ -918,6 +907,7 @@ RETURNS void AS $$
 DECLARE
   ft RECORD;
   monthly_count INT;
+  new_member_id UUID;
 BEGIN
   FOR ft IN
     SELECT * FROM first_timers WHERE status = 'first_timer'
@@ -944,7 +934,15 @@ BEGIN
         ft.address, ft.bacenta, ft.phone_number, ft.who_brought,
         ft.date_joined, CURRENT_DATE, ft.assigned_shepherd, ft.branch_id, 'active'
       )
-      ON CONFLICT DO NOTHING;
+      RETURNING id INTO new_member_id;
+
+      -- Promotion changes the person's primary ID. Move their history in the
+      -- same database transaction so reports never lose the old attendance.
+      UPDATE attendance
+      SET person_id = new_member_id, person_type = 'member'
+      WHERE person_id = ft.id
+        AND person_type = 'first_timer'
+        AND branch_id = ft.branch_id;
 
       UPDATE first_timers SET status = 'member', promoted_at = NOW() WHERE id = ft.id;
     END IF;

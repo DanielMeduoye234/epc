@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, MemberStatus, Bacenta } from '@/lib/types';
 import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
-import { Search, Users, Plus, X, Lock, Pencil, Trash2 } from 'lucide-react';
+import { Search, Users, Plus, X, Lock, Pencil, UserMinus } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
@@ -25,6 +25,8 @@ export default function RegularMembersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editMember, setEditMember] = useState<MemberWithShepherd | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deactivateError, setDeactivateError] = useState('');
+  const [deactivating, setDeactivating] = useState(false);
   const [assigningBacentaId, setAssigningBacentaId] = useState<string | null>(null);
   const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [addForm, setAddForm] = useState({
@@ -152,12 +154,22 @@ export default function RegularMembersPage() {
     setAdding(false);
   }
 
-  async function handleDelete() {
+  async function handleDeactivate() {
     if (!deleteId) return;
+    setDeactivating(true);
+    setDeactivateError('');
     if (!isDemo) {
-      await supabase.from('members').delete().eq('id', deleteId);
+      // Preserve the member row and every linked attendance record. Historical
+      // versions hard-deleted members, leaving attendance permanently orphaned.
+      const { error } = await supabase.from('members').update({ status: 'inactive' }).eq('id', deleteId);
+      if (error) {
+        setDeactivateError(`Member could not be deactivated: ${error.message}`);
+        setDeactivating(false);
+        return;
+      }
     }
-    setMembers(prev => prev.filter(m => m.id !== deleteId));
+    setMembers(prev => prev.map((member) => member.id === deleteId ? { ...member, status: 'inactive' } : member));
+    setDeactivating(false);
     setDeleteId(null);
   }
 
@@ -347,9 +359,9 @@ export default function RegularMembersPage() {
                       className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition" title="Edit">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => setDeleteId(member.id)}
-                      className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition" title="Delete">
-                      <Trash2 size={14} />
+                    <button onClick={() => { setDeactivateError(''); setDeleteId(member.id); }}
+                      className="p-1.5 hover:bg-amber-50 text-gray-400 hover:text-amber-600 rounded transition" title="Deactivate">
+                      <UserMinus size={14} />
                     </button>
                   </div>
                 </div>
@@ -450,9 +462,9 @@ export default function RegularMembersPage() {
                             className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition" title="Edit">
                             <Pencil size={15} />
                           </button>
-                          <button onClick={() => setDeleteId(member.id)}
-                            className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition" title="Delete">
-                            <Trash2 size={15} />
+                          <button onClick={() => { setDeactivateError(''); setDeleteId(member.id); }}
+                            className="p-1.5 hover:bg-amber-50 text-gray-400 hover:text-amber-600 rounded transition" title="Deactivate">
+                            <UserMinus size={15} />
                           </button>
                         </div>
                       </td>
@@ -535,18 +547,25 @@ export default function RegularMembersPage() {
         />
       )}
 
-      {/* Delete Confirmation */}
+      {/* Deactivation Confirmation */}
       {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-black/50" onClick={() => setDeleteId(null)} />
           <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-bold text-black mb-2">Delete Member</h3>
+            <h3 className="text-lg font-bold text-black mb-2">Deactivate Member</h3>
             <p className="text-gray-500 text-sm mb-6">
-              Are you sure you want to delete <strong>{deletingMember?.full_name}</strong>? This cannot be undone.
+              Deactivate <strong>{deletingMember?.full_name}</strong>? Their profile and complete attendance history will be preserved.
             </p>
+            {deactivateError && (
+              <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {deactivateError}
+              </div>
+            )}
             <div className="flex gap-3">
-              <button onClick={() => setDeleteId(null)} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
-              <button onClick={handleDelete} className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium">Delete</button>
+              <button disabled={deactivating} onClick={() => setDeleteId(null)} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium disabled:opacity-50">Cancel</button>
+              <button disabled={deactivating} onClick={handleDeactivate} className="flex-1 px-4 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium disabled:opacity-50">
+                {deactivating ? 'Deactivating…' : 'Deactivate'}
+              </button>
             </div>
           </div>
         </div>

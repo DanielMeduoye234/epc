@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import {
   Users, Plus, X, Search, BarChart3, Grid3X3, CalendarDays,
-  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, AlertCircle, Camera,
+  ChevronLeft, ChevronRight, ChevronDown, UserCheck, UserX, FolderTree, AlertCircle, Camera, RefreshCw,
 } from 'lucide-react';
 import { downscalePhoto } from '@/lib/photos';
 import React from 'react';
@@ -17,8 +17,9 @@ import BacentaSelect from '@/components/BacentaSelect';
 import BranchQRCode from '@/components/BranchQRCode';
 import { getCached, setCached } from '@/lib/query-cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { migrateAttendanceHistory } from '@/lib/attendance-integrity';
 
-type ExistingMemberRow = { first_timer_id: string | null; full_name: string; phone_number: string };
+type ExistingMemberRow = { id: string; first_timer_id: string | null; full_name: string; phone_number: string };
 
 async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: string) {
   const [ftRes, nbRes] = await Promise.all([
@@ -31,7 +32,10 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
   if (firstTimers.length === 0 && newBelievers.length === 0) return;
 
-  const { data: currentMembers } = await supabase.from('members').select('full_name, phone_number, first_timer_id').eq('branch_id', branchId);
+  const { data: currentMembers, error: membersError } = await supabase.from('members').select('id, full_name, phone_number, first_timer_id').eq('branch_id', branchId);
+  if (ftRes.error || nbRes.error || membersError) {
+    throw new Error(ftRes.error?.message || nbRes.error?.message || membersError?.message || 'Promotion data could not be loaded');
+  }
   const memberRows: ExistingMemberRow[] = currentMembers || [];
   const existingFtIds = new Set(memberRows.map((m) => m.first_timer_id).filter(Boolean));
   const existingNames = new Set(memberRows.map((m) => m.full_name.toLowerCase().trim()));
@@ -39,11 +43,12 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
   if (firstTimers.length > 0) {
     const ftIds = firstTimers.map(f => f.id);
-    const { data: ftAtt } = await supabase
+    const { data: ftAtt, error: ftAttendanceError } = await supabase
       .from('attendance')
       .select('person_id')
       .in('person_id', ftIds)
       .eq('is_present', true);
+    if (ftAttendanceError) throw new Error(`First-timer attendance could not be checked: ${ftAttendanceError.message}`);
 
     const ftCounts: Record<string, number> = {};
     (ftAtt || []).forEach((a: { person_id: string }) => {
@@ -52,8 +57,21 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
     for (const ft of firstTimers) {
       const count = ftCounts[ft.id] || 0;
+      const existingCandidates = memberRows.filter((member) =>
+        member.first_timer_id === ft.id ||
+        member.full_name.toLowerCase().trim() === ft.full_name.toLowerCase().trim() ||
+        (ft.phone_number && member.phone_number.trim() === ft.phone_number.trim())
+      );
+      if (count >= 2 && existingCandidates.length === 1) {
+        const existingMember = existingCandidates[0];
+        await migrateAttendanceHistory(supabase, ft.id, 'first_timer', existingMember.id, branchId);
+        const { error: statusError } = await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+        if (statusError) throw new Error(`Attendance was preserved, but promotion status failed: ${statusError.message}`);
+        existingFtIds.add(ft.id);
+        continue;
+      }
       if (count >= 2 && !existingFtIds.has(ft.id) && !existingNames.has(ft.full_name.toLowerCase().trim())) {
-        const { data: newMem } = await supabase.from('members').insert({
+        const { data: newMem, error: memberError } = await supabase.from('members').insert({
           first_timer_id: ft.id,
           full_name: ft.full_name,
           first_name: ft.first_name,
@@ -70,22 +88,29 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           status: 'active'
         }).select('id').maybeSingle();
 
-        if (newMem?.id) {
-          await supabase.from('attendance').update({ person_id: newMem.id, person_type: 'member' }).eq('person_id', ft.id);
+        if (memberError || !newMem?.id) {
+          throw new Error(`First timer could not be promoted: ${memberError?.message || 'member ID was not returned'}`);
         }
-
-        await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+        if (newMem.id) {
+          await migrateAttendanceHistory(supabase, ft.id, 'first_timer', newMem.id, branchId);
+          const { error: statusError } = await supabase.from('first_timers').update({ status: 'member', promoted_at: new Date().toISOString() }).eq('id', ft.id);
+          if (statusError) throw new Error(`Attendance was preserved, but promotion status failed: ${statusError.message}`);
+          existingFtIds.add(ft.id);
+          existingNames.add(ft.full_name.toLowerCase().trim());
+          if (ft.phone_number) existingPhones.add(ft.phone_number.trim());
+        }
       }
     }
   }
 
   if (newBelievers.length > 0) {
     const nbIds = newBelievers.map(n => n.id);
-    const { data: nbAtt } = await supabase
+    const { data: nbAtt, error: nbAttendanceError } = await supabase
       .from('attendance')
       .select('person_id')
       .in('person_id', nbIds)
       .eq('is_present', true);
+    if (nbAttendanceError) throw new Error(`New-believer attendance could not be checked: ${nbAttendanceError.message}`);
 
     const nbCounts: Record<string, number> = {};
     (nbAtt || []).forEach((a: { person_id: string }) => {
@@ -94,9 +119,17 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
     for (const nb of newBelievers) {
       const count = nbCounts[nb.id] || 0;
-      const isAlreadyMember = existingNames.has(nb.full_name.toLowerCase().trim()) || (nb.phone_number && existingPhones.has(nb.phone_number.trim()));
+      const existingCandidates = memberRows.filter((member) =>
+        member.full_name.toLowerCase().trim() === nb.full_name.toLowerCase().trim() ||
+        (nb.phone_number && member.phone_number.trim() === nb.phone_number.trim())
+      );
+      const isAlreadyMember = existingCandidates.length > 0;
+      if (count >= 2 && existingCandidates.length === 1) {
+        await migrateAttendanceHistory(supabase, nb.id, 'new_believer', existingCandidates[0].id, branchId);
+        continue;
+      }
       if (count >= 2 && !isAlreadyMember) {
-        const { data: newMem } = await supabase.from('members').insert({
+        const { data: newMem, error: memberError } = await supabase.from('members').insert({
           full_name: nb.full_name,
           address: nb.address,
           bacenta: nb.bacenta,
@@ -109,8 +142,13 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           status: 'active'
         }).select('id').maybeSingle();
 
-        if (newMem?.id) {
-          await supabase.from('attendance').update({ person_id: newMem.id, person_type: 'member' }).eq('person_id', nb.id);
+        if (memberError || !newMem?.id) {
+          throw new Error(`New believer could not be promoted: ${memberError?.message || 'member ID was not returned'}`);
+        }
+        if (newMem.id) {
+          await migrateAttendanceHistory(supabase, nb.id, 'new_believer', newMem.id, branchId);
+          existingNames.add(nb.full_name.toLowerCase().trim());
+          if (nb.phone_number) existingPhones.add(nb.phone_number.trim());
         }
       }
     }
@@ -148,6 +186,7 @@ interface TrackedPerson {
   bacenta: string;
   status: string;
   person_type: PersonType;
+  is_archived?: boolean;
 }
 
 interface AddForm {
@@ -169,6 +208,41 @@ interface WeeklyAttendancePoint {
 interface WeeklyFirstTimerPoint {
   week: string;
   count: number;
+}
+
+interface AttendanceQueryRow {
+  id: string;
+  person_id: string;
+  person_type: PersonType;
+  date: string;
+  is_present: boolean;
+}
+
+const ATTENDANCE_PAGE_SIZE = 1000;
+
+async function fetchAllAttendanceRows(
+  supabase: SupabaseClient,
+  branchId: string,
+  startDate: string,
+  endDate?: string
+): Promise<{ data: AttendanceQueryRow[]; error: { message: string } | null }> {
+  const rows: AttendanceQueryRow[] = [];
+  for (let from = 0; ; from += ATTENDANCE_PAGE_SIZE) {
+    let query = supabase
+      .from('attendance')
+      .select('id, person_id, person_type, date, is_present')
+      .eq('branch_id', branchId)
+      .gte('date', startDate)
+      .order('id', { ascending: true })
+      .range(from, from + ATTENDANCE_PAGE_SIZE - 1);
+    if (endDate) query = query.lte('date', endDate);
+
+    const { data, error } = await query;
+    if (error) return { data: [], error };
+    const page = (data || []) as AttendanceQueryRow[];
+    rows.push(...page);
+    if (page.length < ATTENDANCE_PAGE_SIZE) return { data: rows, error: null };
+  }
 }
 
 // Snapshot cached for instant rendering on revisits (see lib/query-cache).
@@ -198,11 +272,13 @@ export default function ChurchAttendancePage() {
 
   const [tab, setTab] = useState<Tab>('overview');
   const [members, setMembers] = useState<TrackedPerson[]>([]);
+  const [archivedAttendancePeople, setArchivedAttendancePeople] = useState<TrackedPerson[]>([]);
   const [branchName, setBranchName] = useState('');
   const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [weeklyAttendance, setWeeklyAttendance] = useState<WeeklyAttendancePoint[]>([]);
   const [weeklyFirstTimers, setWeeklyFirstTimers] = useState<WeeklyFirstTimerPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState('');
 
   // Overview state
   const [search, setSearch] = useState('');
@@ -217,6 +293,7 @@ export default function ChurchAttendancePage() {
   const [photoPreview, setPhotoPreview] = useState('');
   const photoInputRef = useRef<HTMLInputElement>(null);
   const promotionCheckRunning = useRef(false);
+  const dataFetchRequestRef = useRef(0);
 
   // Bacenta management state
   const [showBacentaModal, setShowBacentaModal] = useState(false);
@@ -236,7 +313,11 @@ export default function ChurchAttendancePage() {
   const [attendanceError, setAttendanceError] = useState('');
   const [showSundayRecords, setShowSundayRecords] = useState(false);
   const loadedMonthRef = useRef<string>('');
-  const pendingSavesRef = useRef<Set<string>>(new Set());
+  const pendingSavesRef = useRef<Map<string, boolean | undefined>>(new Map());
+  const trackerFetchRequestRef = useRef(0);
+  const attendanceMutationVersionRef = useRef(0);
+  const recentEditsRef = useRef<Map<string, { value: boolean | undefined; version: number }>>(new Map());
+  const [savingAttendanceKeys, setSavingAttendanceKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!profile) return;
@@ -259,7 +340,30 @@ export default function ChurchAttendancePage() {
         fetchTrackerAttendance(true);
       }
     }
-  }, [tab, trackerYear, trackerMonth]);
+  }, [tab, trackerYear, trackerMonth, profile?.branch_id]);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (pendingSavesRef.current.size === 0) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, []);
+
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      if ((tab === 'tracker' || tab === 'records') && document.visibilityState === 'visible') {
+        void fetchTrackerAttendance(true);
+      }
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
+    };
+  }, [tab, trackerYear, trackerMonth, profile?.branch_id]);
 
   function applySnapshot(snap: PageSnapshot) {
     setMembers(snap.members);
@@ -270,18 +374,31 @@ export default function ChurchAttendancePage() {
   }
 
   async function fetchData(showSpinner = true) {
+    const requestId = ++dataFetchRequestRef.current;
+    const branchId = profile!.branch_id;
     if (showSpinner) setLoading(true);
     const eightWeeksAgo = new Date();
     eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
     const weeklyStartDate = eightWeeksAgo.toISOString().split('T')[0];
 
     const [mRes, bRes, attendanceRes, firstTimersRes, branchRes] = await Promise.all([
-      supabase.from('members').select('id, full_name, phone_number, bacenta, status').eq('branch_id', profile!.branch_id).order('bacenta').order('full_name'),
-      supabase.from('bacentas').select('*').eq('branch_id', profile!.branch_id).order('name'),
-      supabase.from('attendance').select('date, is_present').eq('branch_id', profile!.branch_id).gte('date', weeklyStartDate),
-      supabase.from('first_timers').select('date_joined').eq('branch_id', profile!.branch_id).gte('date_joined', weeklyStartDate),
-      supabase.from('branches').select('name').eq('id', profile!.branch_id).maybeSingle(),
+      supabase.from('members').select('id, full_name, phone_number, bacenta, status').eq('branch_id', branchId).order('bacenta').order('full_name'),
+      supabase.from('bacentas').select('*').eq('branch_id', branchId).order('name'),
+      fetchAllAttendanceRows(supabase, branchId, weeklyStartDate),
+      supabase.from('first_timers').select('date_joined').eq('branch_id', branchId).gte('date_joined', weeklyStartDate),
+      supabase.from('branches').select('name').eq('id', branchId).maybeSingle(),
     ]);
+
+    if (requestId !== dataFetchRequestRef.current) return false;
+
+    const loadError = mRes.error || bRes.error || attendanceRes.error || firstTimersRes.error || branchRes.error;
+    if (loadError) {
+      // Keep the last known-good snapshot. Replacing it with empty arrays on a
+      // transient read failure made correctly stored data appear to vanish.
+      setPageError(`Could not refresh church attendance: ${loadError.message}`);
+      setLoading(false);
+      return false;
+    }
 
     // Only regular members are tracked here — the members table is the single
     // source of truth so counts match the Regular Members page and dashboard.
@@ -328,26 +445,34 @@ export default function ChurchAttendancePage() {
       branchName: branchRes.data?.name || 'This Branch',
     };
     applySnapshot(snapshot);
-    setCached(`church-attendance:${profile!.branch_id}`, snapshot);
+    setCached(`church-attendance:${branchId}`, snapshot);
 
+    setPageError('');
     setLoading(false);
+    return true;
   }
 
   async function fetchTrackerAttendance(force = false) {
-    const currentMonthKey = `${trackerYear}-${trackerMonth}`;
+    const currentMonthKey = `${profile!.branch_id}:${trackerYear}-${trackerMonth}`;
     if (!force && loadedMonthRef.current === currentMonthKey && Object.keys(attendanceMap).length > 0) {
       return;
     }
+    const requestId = ++trackerFetchRequestRef.current;
+    const mutationVersionAtStart = attendanceMutationVersionRef.current;
     setLoadingAtt(true);
     const startDate = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-01`;
-    const endDate = `${trackerYear}-12-31`;
+    const endDate = toDateStr(new Date(trackerYear, trackerMonth + 1, 0));
 
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('person_id, date, is_present')
-      .eq('branch_id', profile!.branch_id)
-      .gte('date', startDate)
-      .lte('date', endDate);
+    const { data, error } = await fetchAllAttendanceRows(
+      supabase,
+      profile!.branch_id,
+      startDate,
+      endDate
+    );
+
+    // Month navigation can start a newer request before an older one returns.
+    // Ignore the stale response instead of letting it replace the visible month.
+    if (requestId !== trackerFetchRequestRef.current) return;
 
     if (error) {
       console.error('Attendance fetch error:', error);
@@ -357,19 +482,43 @@ export default function ChurchAttendancePage() {
     }
 
     const map: Record<string, Record<string, boolean>> = {};
-    data?.forEach((a: { person_id: string; date: string; is_present: boolean }) => {
+    data.forEach((a) => {
       if (!map[a.person_id]) map[a.person_id] = {};
       map[a.person_id][a.date] = a.is_present;
     });
 
-    // Retain any pending in-flight updates so background refetches don't wipe optimistic state
-    setAttendanceMap(prev => {
+    // Hard-deleted members used to leave attendance behind. Keep those rows
+    // visible as read-only archived records instead of silently dropping them.
+    const knownMemberIds = new Set(members.map((member) => member.id));
+    const archivedIds = Array.from(new Set<string>(
+      data
+        .filter((row) => row.person_type === 'member' && !knownMemberIds.has(row.person_id))
+        .map((row) => row.person_id)
+    ));
+    setArchivedAttendancePeople(archivedIds.map((id) => ({
+      id,
+      full_name: `Archived member ${id.slice(0, 6).toUpperCase()}`,
+      phone_number: '',
+      bacenta: 'Archived records',
+      status: 'inactive',
+      person_type: 'member',
+      is_archived: true,
+    })));
+
+    // Retain writes that started after this fetch (including a completed write
+    // whose response beat this older read) so stale reads cannot undo clicks.
+    setAttendanceMap(() => {
       const merged = { ...map };
-      pendingSavesRef.current.forEach((saveKey) => {
+      recentEditsRef.current.forEach((edit, saveKey) => {
+        if (edit.version <= mutationVersionAtStart) return;
         const [memId, dateStr] = saveKey.split(':::');
-        if (memId && dateStr && prev[memId] && prev[memId][dateStr] !== undefined) {
-          if (!merged[memId]) merged[memId] = {};
-          merged[memId][dateStr] = prev[memId][dateStr];
+        if (memId && dateStr) {
+          if (edit.value === undefined) {
+            if (merged[memId]) delete merged[memId][dateStr];
+          } else {
+            if (!merged[memId]) merged[memId] = {};
+            merged[memId][dateStr] = edit.value;
+          }
         }
       });
       return merged;
@@ -379,8 +528,30 @@ export default function ChurchAttendancePage() {
     setLoadingAtt(false);
   }
 
-  async function toggleAttendance(memberId: string, dateStr: string, next?: boolean | null) {
+  async function toggleAttendance(
+    memberId: string,
+    dateStr: string,
+    next?: boolean | null,
+    options?: { skipClearConfirmation?: boolean }
+  ) {
+    const saveKey = `${memberId}:::${dateStr}`;
+    // A second request for the same cell can finish before the first and then
+    // be overwritten by it. Keep each cell single-flight to preserve ordering.
+    if (pendingSavesRef.current.has(saveKey)) return false;
+
     const current = (attendanceMap[memberId] || {})[dateStr];
+    const targetMember = [...members, ...archivedAttendancePeople].find((member) => member.id === memberId);
+    if (!targetMember || targetMember.is_archived) return false;
+
+    if (
+      next === null &&
+      current !== undefined &&
+      !options?.skipClearConfirmation &&
+      !window.confirm(`Clear ${targetMember.full_name}'s stored attendance for ${dateStr}?`)
+    ) {
+      return false;
+    }
+
     const newVal = next === null
       ? undefined
       : typeof next === 'boolean'
@@ -391,8 +562,10 @@ export default function ChurchAttendancePage() {
       ? false
       : undefined;
 
-    const saveKey = `${memberId}:::${dateStr}`;
-    pendingSavesRef.current.add(saveKey);
+    const mutationVersion = ++attendanceMutationVersionRef.current;
+    pendingSavesRef.current.set(saveKey, newVal);
+    recentEditsRef.current.set(saveKey, { value: newVal, version: mutationVersion });
+    setSavingAttendanceKeys(prev => new Set(prev).add(saveKey));
 
     setAttendanceError('');
     setAttendanceMap(prev => {
@@ -402,10 +575,9 @@ export default function ChurchAttendancePage() {
       return updated;
     });
 
-    const targetMember = members.find(m => m.id === memberId);
-    const personType = targetMember?.person_type || 'member';
+    const personType = targetMember.person_type;
 
-    let dbError: any = null;
+    let dbError: { message?: string } | null = null;
     try {
       if (newVal === undefined) {
         const { error } = await supabase
@@ -428,24 +600,19 @@ export default function ChurchAttendancePage() {
           { onConflict: 'person_id,date,person_type' }
         );
 
-        if (error) {
-          // Fallback delete + insert if onConflict constraint mismatch occurs
-          await supabase.from('attendance').delete().eq('person_id', memberId).eq('date', dateStr).eq('branch_id', profile!.branch_id);
-          const { error: insertErr } = await supabase.from('attendance').insert({
-            person_id: memberId,
-            person_type: personType,
-            date: dateStr,
-            is_present: newVal,
-            marked_by: profile!.id,
-            branch_id: profile!.branch_id,
-          });
-          dbError = insertErr;
-        }
+        // Never delete a valid row as an error fallback. The old fallback
+        // caused permanent loss whenever its follow-up insert also failed.
+        dbError = error;
       }
-    } catch (err: any) {
-      dbError = err;
+    } catch (err: unknown) {
+      dbError = err instanceof Error ? err : { message: 'Database write failed' };
     } finally {
       pendingSavesRef.current.delete(saveKey);
+      setSavingAttendanceKeys(prev => {
+        const nextKeys = new Set(prev);
+        nextKeys.delete(saveKey);
+        return nextKeys;
+      });
     }
 
     if (dbError) {
@@ -455,6 +622,8 @@ export default function ChurchAttendancePage() {
         else updated[memberId][dateStr] = current;
         return updated;
       });
+      const latestEdit = recentEditsRef.current.get(saveKey);
+      if (latestEdit?.version === mutationVersion) recentEditsRef.current.delete(saveKey);
       setAttendanceError(`Attendance was not saved: ${dbError.message || 'Database write failed'}`);
       return false;
     }
@@ -462,8 +631,14 @@ export default function ChurchAttendancePage() {
     if (newVal === true && !promotionCheckRunning.current) {
       promotionCheckRunning.current = true;
       checkAndPromoteIndividuals(supabase, profile!.branch_id)
-        .then(() => fetchData(false))
-        .catch(() => {})
+        .then(async () => {
+          await fetchData(false);
+          await fetchTrackerAttendance(true);
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'Promotion refresh failed';
+          setAttendanceError(`Attendance saved, but related records could not refresh: ${message}`);
+        })
         .finally(() => { promotionCheckRunning.current = false; });
     }
 
@@ -472,14 +647,39 @@ export default function ChurchAttendancePage() {
 
   async function bulkSetAttendance(value: boolean | null) {
     if (!selectedSunday || trackerMembers.length === 0) return;
+    const editableMembers = filteredTrackerMembers.filter((member) => !member.is_archived);
     const membersToUpdate = value === false
-      ? filteredTrackerMembers.filter(
+      ? editableMembers.filter(
           (member) => (attendanceMap[member.id] || {})[selectedSunday] === undefined
         )
-      : filteredTrackerMembers;
-    await Promise.all(
-      membersToUpdate.map((m) => toggleAttendance(m.id, selectedSunday, value))
-    );
+      : editableMembers;
+    if (
+      value === null &&
+      membersToUpdate.some((member) => (attendanceMap[member.id] || {})[selectedSunday] !== undefined) &&
+      !window.confirm(`Clear stored attendance for ${membersToUpdate.length} visible member(s) on ${selectedSunday}?`)
+    ) {
+      return;
+    }
+    // Avoid flooding the browser/database with hundreds of concurrent writes.
+    for (let i = 0; i < membersToUpdate.length; i += 10) {
+      await Promise.all(
+        membersToUpdate.slice(i, i + 10).map((m) => toggleAttendance(
+          m.id,
+          selectedSunday,
+          value,
+          { skipClearConfirmation: value === null }
+        ))
+      );
+    }
+  }
+
+  function changeTrackerMonth(delta: number) {
+    const nextMonth = new Date(trackerYear, trackerMonth + delta, 1);
+    trackerFetchRequestRef.current += 1;
+    setTrackerYear(nextMonth.getFullYear());
+    setTrackerMonth(nextMonth.getMonth());
+    setSelectedSunday('');
+    setAttendanceError('');
   }
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -513,12 +713,21 @@ export default function ChurchAttendancePage() {
 
     // Re-check against the database right before inserting, in case another
     // device registered the same name after this page was loaded.
-    const { data: existingRows } = await supabase
+    const { data: existingRows, error: duplicateCheckError } = await supabase
       .from('members')
-      .select('full_name')
+      .select('full_name, phone_number')
       .eq('branch_id', profile!.branch_id);
+    if (duplicateCheckError) {
+      setAddError(`Could not verify existing members: ${duplicateCheckError.message}`);
+      setAdding(false);
+      return;
+    }
     const nameKey = trimmedName.toLowerCase();
-    if ((existingRows || []).some((r: { full_name: string }) => r.full_name.trim().toLowerCase() === nameKey)) {
+    const phoneKey = addForm.phone_number.replace(/\D/g, '');
+    if ((existingRows || []).some((r: { full_name: string; phone_number: string }) =>
+      r.full_name.trim().toLowerCase() === nameKey ||
+      (phoneKey && r.phone_number.replace(/\D/g, '') === phoneKey)
+    )) {
       setAddError(`"${trimmedName}" is already registered as a member of this branch.`);
       setAdding(false);
       return;
@@ -539,7 +748,7 @@ export default function ChurchAttendancePage() {
     }
 
     const today = new Date().toISOString().split('T')[0];
-    await supabase.from('members').insert({
+    const { error: memberInsertError } = await supabase.from('members').insert({
       full_name: trimmedName,
       phone_number: addForm.phone_number,
       address: addForm.address || '',
@@ -551,8 +760,14 @@ export default function ChurchAttendancePage() {
       status: 'active',
       photo_url: photoUrl,
     });
+    if (memberInsertError) {
+      setAddError(`Member was not saved: ${memberInsertError.message}`);
+      setAdding(false);
+      return;
+    }
+
     if (addForm.is_first_timer) {
-      await supabase.from('first_timers').insert({
+      const { error: firstTimerInsertError } = await supabase.from('first_timers').insert({
         full_name: trimmedName,
         phone_number: addForm.phone_number,
         address: addForm.address || '',
@@ -563,6 +778,14 @@ export default function ChurchAttendancePage() {
         status: 'first_timer',
         photo_url: photoUrl,
       });
+      if (firstTimerInsertError) {
+        // The primary member record is already durable. Keep the form open and
+        // explain the partial result instead of pretending both writes worked.
+        setAddError(`Member saved, but the First Timers entry failed: ${firstTimerInsertError.message}`);
+        setAdding(false);
+        await fetchData(false);
+        return;
+      }
     }
     setAddForm({ full_name: '', phone_number: '', address: '', bacenta: '', who_brought: '', is_first_timer: false });
     removePhoto();
@@ -575,12 +798,17 @@ export default function ChurchAttendancePage() {
     e.preventDefault();
     if (!newBacenta.name.trim()) return;
     setAddingBacenta(true);
-    await supabase.from('bacentas').insert({
+    const { error } = await supabase.from('bacentas').insert({
       name: newBacenta.name,
       leader_name: newBacenta.leader_name || null,
       location: newBacenta.location || null,
       branch_id: profile!.branch_id,
     });
+    if (error) {
+      setPageError(`Bacenta was not saved: ${error.message}`);
+      setAddingBacenta(false);
+      return;
+    }
     setNewBacenta({ name: '', leader_name: '', location: '' });
     setShowBacentaModal(false);
     setAddingBacenta(false);
@@ -631,12 +859,17 @@ export default function ChurchAttendancePage() {
 
   const sundays = useMemo(() => getSundaysFromMonth(trackerYear, trackerMonth), [trackerYear, trackerMonth]);
 
+  const resolvedArchivedAttendancePeople = useMemo(() => {
+    const currentMemberIds = new Set(members.map((member) => member.id));
+    return archivedAttendancePeople.filter((person) => !currentMemberIds.has(person.id));
+  }, [members, archivedAttendancePeople]);
+
   const trackerMembers = useMemo(() =>
-    members.filter(m =>
+    [...members, ...resolvedArchivedAttendancePeople].filter(m =>
       (trackerBacenta === 'all' || m.bacenta === trackerBacenta) &&
       m.full_name.toLowerCase().includes(trackerSearch.toLowerCase())
     ),
-    [members, trackerBacenta, trackerSearch]);
+    [members, resolvedArchivedAttendancePeople, trackerBacenta, trackerSearch]);
 
   // Derive the active Sunday: the user's pick when it belongs to this month,
   // otherwise the first Sunday of the month (no state syncing needed).
@@ -678,7 +911,8 @@ export default function ChurchAttendancePage() {
   }, [trackerMembers, attendanceMap, selectedSunday]);
 
   const sundayRecords = useMemo(() => {
-    const scopedMembers = members.filter((m) => trackerBacenta === 'all' || m.bacenta === trackerBacenta);
+    const scopedMembers = [...members, ...resolvedArchivedAttendancePeople]
+      .filter((m) => trackerBacenta === 'all' || m.bacenta === trackerBacenta);
     return sundays.map((s) => {
       const dayKey = toDateStr(s);
       const present = scopedMembers.filter((m) => (attendanceMap[m.id] || {})[dayKey] === true).length;
@@ -693,7 +927,7 @@ export default function ChurchAttendancePage() {
         attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
       };
     });
-  }, [sundays, members, trackerBacenta, attendanceMap]);
+  }, [sundays, members, resolvedArchivedAttendancePeople, trackerBacenta, attendanceMap]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -717,6 +951,18 @@ export default function ChurchAttendancePage() {
           Add Member
         </button>
       </div>
+
+      {pageError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {pageError} The last successfully loaded data is still shown.
+        </div>
+      )}
+
+      {savingAttendanceKeys.size > 0 && (
+        <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+          Saving {savingAttendanceKeys.size} attendance change{savingAttendanceKeys.size === 1 ? '' : 's'}…
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
@@ -923,7 +1169,7 @@ export default function ChurchAttendancePage() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
               <button
-                onClick={() => setTrackerMonth(m => m === 0 ? 11 : m - 1)}
+                onClick={() => changeTrackerMonth(-1)}
                 className="p-0.5 text-gray-500 hover:text-orange-600 transition"
               >
                 <ChevronLeft size={18} />
@@ -932,7 +1178,7 @@ export default function ChurchAttendancePage() {
                 {new Date(trackerYear, trackerMonth).toLocaleString('en', { month: 'long', year: 'numeric' })}
               </span>
               <button
-                onClick={() => setTrackerMonth(m => m === 11 ? 0 : m + 1)}
+                onClick={() => changeTrackerMonth(1)}
                 className="p-0.5 text-gray-500 hover:text-orange-600 transition"
               >
                 <ChevronRight size={18} />
@@ -971,6 +1217,15 @@ export default function ChurchAttendancePage() {
             <span className="text-xs text-gray-400">
               {sundays.length} Sundays &middot; {trackerMembers.length} members
             </span>
+            <button
+              type="button"
+              onClick={() => fetchTrackerAttendance(true)}
+              disabled={loadingAtt || savingAttendanceKeys.size > 0}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-orange-300 hover:text-orange-600 transition disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={loadingAtt ? 'animate-spin' : ''} />
+              Refresh
+            </button>
           </div>
 
           <div className="relative">
@@ -1124,11 +1379,16 @@ export default function ChurchAttendancePage() {
                       <div className="divide-y divide-gray-50">
                         {groupMembers.map((member) => {
                           const value = (attendanceMap[member.id] || {})[selectedSunday];
+                          const saveKey = `${member.id}:::${selectedSunday}`;
+                          const isSavingAttendance = savingAttendanceKeys.has(saveKey);
                           return (
                             <div key={member.id} className="px-3 py-2">
                               <div className="flex items-center justify-between gap-2 mb-1">
                                 <div>
                                   <p className="text-sm font-medium text-black leading-tight">{member.full_name}</p>
+                                  {member.is_archived && (
+                                    <p className="text-[10px] text-amber-700 mt-0.5">Read-only history — member profile was deleted</p>
+                                  )}
                                 </div>
                                 <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${
                                   value === true
@@ -1143,31 +1403,34 @@ export default function ChurchAttendancePage() {
                               <div className="grid grid-cols-3 gap-1.5">
                                 <button
                                   onClick={() => toggleAttendance(member.id, selectedSunday, true)}
+                                  disabled={isSavingAttendance || member.is_archived}
                                   className={`py-1.5 rounded-lg text-xs font-medium transition border ${
                                     value === true
                                       ? 'bg-green-500 border-green-500 text-white'
                                       : 'bg-white border-gray-200 text-gray-600 hover:border-green-300'
-                                  }`}
+                                  } disabled:cursor-wait disabled:opacity-60`}
                                 >
                                   Present
                                 </button>
                                 <button
                                   onClick={() => toggleAttendance(member.id, selectedSunday, false)}
+                                  disabled={isSavingAttendance || member.is_archived}
                                   className={`py-1.5 rounded-lg text-xs font-medium transition border ${
                                     value === false
                                       ? 'bg-red-500 border-red-500 text-white'
                                       : 'bg-white border-gray-200 text-gray-600 hover:border-red-300'
-                                  }`}
+                                  } disabled:cursor-wait disabled:opacity-60`}
                                 >
                                   Absent
                                 </button>
                                 <button
                                   onClick={() => toggleAttendance(member.id, selectedSunday, null)}
+                                  disabled={isSavingAttendance || member.is_archived}
                                   className={`py-1.5 rounded-lg text-xs font-medium transition border ${
                                     value === undefined
                                       ? 'bg-gray-600 border-gray-600 text-white'
                                       : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'
-                                  }`}
+                                  } disabled:cursor-wait disabled:opacity-60`}
                                 >
                                   Clear
                                 </button>
