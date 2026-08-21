@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #000000;
+  --sidebar-width: 18rem;
 }
 
 html {
@@ -16,6 +17,16 @@ body {
 }
 
 @layer components {
+  .sidebar-scroll {
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
   .table-shell {
     background: #fff;
     border: 1px solid #e5e5e5;

@@ -24,8 +24,12 @@ import {
   FileText,
   ClipboardList,
   Gift,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
+const SIDEBAR_KEY = 'epc-sidebar-collapsed';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['bishop', 'super_admin', 'shepherd', 'recorder'] },
@@ -48,11 +52,19 @@ const navigation = [
   { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['bishop', 'super_admin'] },
 ];
 
+function roleBadgeClass(role?: string) {
+  if (role === 'super_admin') return 'bg-orange-100 text-orange-800';
+  if (role === 'bishop') return 'bg-purple-100 text-purple-800';
+  if (role === 'shepherd') return 'bg-blue-100 text-blue-800';
+  return 'bg-green-100 text-green-800';
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { profile } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const supabase = createClient();
 
   const filteredNav = navigation.filter(
@@ -60,8 +72,26 @@ export default function Sidebar() {
   );
 
   useEffect(() => {
+    const saved = localStorage.getItem(SIDEBAR_KEY);
+    setCollapsed(saved === '1');
+  }, []);
+
+  useEffect(() => {
+    const width = collapsed ? '4.75rem' : '18rem';
+    document.documentElement.style.setProperty('--sidebar-width', width);
+  }, [collapsed]);
+
+  useEffect(() => {
     filteredNav.forEach((item) => router.prefetch(item.href));
-  }, [router, filteredNav]);
+  }, [router, profile?.role]);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0');
+      return next;
+    });
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -69,67 +99,69 @@ export default function Sidebar() {
     router.refresh();
   };
 
-  const navContent = (
+  const navContent = (compact: boolean) => (
     <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="p-6 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 flex items-center justify-center">
-            <img src="/logo.png" alt="EPC Logo" className="w-10 h-10 object-contain rounded-full" />
-          </div>
-          <div>
-            <h1 className="font-bold text-black text-sm">Everything by Prayer</h1>
-            <p className="text-xs text-gray-500">{profile?.branch?.name || 'Dashboard'}</p>
-          </div>
+      <div className={`border-b border-gray-100 ${compact ? 'p-3' : 'p-5'}`}>
+        <div className={`flex items-center ${compact ? 'justify-center' : 'gap-3'}`}>
+          <img src="/logo.png" alt="Everything by Prayer" className="w-10 h-10 object-contain rounded-full shrink-0" />
+          {!compact && (
+            <div className="min-w-0">
+              <h1 className="font-semibold text-black text-sm leading-tight text-balance">Everything by Prayer</h1>
+              <p className="text-xs text-neutral-600 truncate mt-0.5">{profile?.branch?.name || 'Dashboard'}</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+      <nav className="sidebar-scroll flex-1 px-2 py-3 space-y-0.5" aria-label="Main">
         {filteredNav.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
               key={item.name}
               href={item.href}
+              title={item.name}
               onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition ${
+              className={`group relative flex items-center rounded-lg text-sm font-medium outline-none transition-colors duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 ${
+                compact ? 'justify-center h-11 w-full' : 'gap-3 h-11 px-3'
+              } ${
                 isActive
-                  ? 'bg-linear-to-r from-orange-400 to-orange-600 text-white'
-                  : 'text-gray-700 hover:bg-orange-50 hover:text-orange-600'
+                  ? 'bg-orange-50 text-orange-800'
+                  : 'text-neutral-700 hover:bg-neutral-50 hover:text-black'
               }`}
             >
-              <item.icon size={20} />
-              {item.name}
+              {isActive && (
+                <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-orange-500" aria-hidden />
+              )}
+              <item.icon size={20} className="shrink-0" strokeWidth={isActive ? 2.25 : 1.75} />
+              {!compact && <span className="truncate">{item.name}</span>}
+              {compact && (
+                <span className="pointer-events-none absolute left-full ml-2 z-20 hidden rounded-md bg-neutral-900 px-2 py-1 text-xs text-white whitespace-nowrap group-hover:block">
+                  {item.name}
+                </span>
+              )}
             </Link>
           );
         })}
       </nav>
 
-      {/* User Info & Logout */}
-      <div className="p-4 border-t border-gray-100">
-        <div className="mb-3 px-4">
-          <p className="text-sm font-medium text-black">{profile?.full_name}</p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
-              profile?.role === 'super_admin'
-                ? 'bg-orange-100 text-orange-700'
-                : profile?.role === 'bishop'
-                ? 'bg-purple-100 text-purple-700'
-                : profile?.role === 'shepherd'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-green-100 text-green-700'
-            }`}>
+      <div className={`border-t border-gray-100 ${compact ? 'p-2' : 'p-3'}`}>
+        {!compact && (
+          <div className="mb-3 px-2">
+            <p className="text-sm font-medium text-black truncate">{profile?.full_name}</p>
+            <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${roleBadgeClass(profile?.role)}`}>
               {profile?.role === 'recorder' ? 'NB Officer' : profile?.role?.replace('_', ' ')}
             </span>
           </div>
-        </div>
+        )}
         <button
+          type="button"
           onClick={handleLogout}
-          className="flex items-center justify-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-600 hover:text-white hover:border-red-600 transition-all duration-200 w-full"
+          title="Log out"
+          className={`flex items-center justify-center gap-2 h-11 rounded-lg text-sm font-medium text-red-700 bg-red-50 border border-red-100 hover:bg-red-600 hover:text-white hover:border-red-600 transition-colors duration-200 motion-reduce:transition-none w-full outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${compact ? 'px-0' : 'px-3'}`}
         >
           <LogOut size={18} />
-          Logout
+          {!compact && 'Log out'}
         </button>
       </div>
     </div>
@@ -137,33 +169,46 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile toggle */}
       <button
+        type="button"
         onClick={() => setMobileOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-md"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2.5 min-h-11 min-w-11 bg-white rounded-lg shadow-md border border-gray-100 outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+        aria-label="Open menu"
       >
-        <Menu size={24} className="text-black" />
+        <Menu size={22} className="text-black" />
       </button>
 
-      {/* Mobile sidebar overlay */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="fixed inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <div className="relative w-72 bg-white h-full shadow-xl">
             <button
+              type="button"
               onClick={() => setMobileOpen(false)}
-              className="absolute top-4 right-4 p-1"
+              className="absolute top-4 right-4 p-2 min-h-11 min-w-11 rounded-lg hover:bg-neutral-50 outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+              aria-label="Close menu"
             >
-              <X size={20} className="text-gray-500" />
+              <X size={20} className="text-neutral-600" />
             </button>
-            {navContent}
+            {navContent(false)}
           </div>
         </div>
       )}
 
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex lg:w-72 lg:flex-col lg:fixed lg:inset-y-0 bg-white border-r border-gray-200">
-        {navContent}
+      <aside
+        className="relative hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 bg-white border-r border-gray-200 z-30 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        style={{ width: collapsed ? '4.75rem' : '18rem' }}
+      >
+        {navContent(collapsed)}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="absolute -right-3 top-20 z-40 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-neutral-600 shadow-sm hover:bg-orange-50 hover:text-orange-700 outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? <PanelLeft size={14} /> : <PanelLeftClose size={14} />}
+        </button>
       </aside>
     </>
   );
