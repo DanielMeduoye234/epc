@@ -42,7 +42,7 @@ export async function getBranchWhatsAppCredentials(
   supabase: SupabaseClient,
   branchId: string
 ): Promise<WhatsAppCredentials> {
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  const accessToken = getWhatsAppAccessToken();
   const envNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   let branchNumberId: string | null = null;
 
@@ -63,7 +63,11 @@ export async function getBranchWhatsAppCredentials(
 }
 
 export function getWhatsAppAccessToken(): string {
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  const raw = process.env.WHATSAPP_ACCESS_TOKEN || '';
+  const accessToken = raw
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/^Bearer\s+/i, '');
   if (!accessToken) {
     throw new Error('WhatsApp API credentials not configured');
   }
@@ -91,7 +95,7 @@ function personalizeMessage(template: string, name: string): string {
 
 export async function sendWhatsAppMessage({ to, message, imageUrl, phoneNumberId, accessToken }: SendMessageOptions) {
   const resolvedId = phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const resolvedToken = accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+  const resolvedToken = accessToken || getWhatsAppAccessToken();
 
   if (!resolvedId || !resolvedToken) {
     throw new Error('WhatsApp API credentials not configured');
@@ -173,7 +177,7 @@ export async function sendWhatsAppTemplate({
   accessToken?: string;
 }) {
   const resolvedId = phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const resolvedToken = accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+  const resolvedToken = accessToken || getWhatsAppAccessToken();
 
   if (!resolvedId || !resolvedToken) {
     throw new Error('WhatsApp API credentials not configured');
