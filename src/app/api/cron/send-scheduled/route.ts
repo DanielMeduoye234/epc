@@ -1,20 +1,16 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { sendBulkWhatsApp } from '@/lib/whatsapp';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { authorizeCron } from '@/lib/cron-auth';
+import { getBranchWhatsAppCredentials, sendBulkWhatsApp } from '@/lib/whatsapp';
+import { templateNameForMessageType } from '@/lib/whatsapp-templates';
 import { NextRequest, NextResponse } from 'next/server';
 import { BroadcastAudience } from '@/lib/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-// This endpoint sends broadcasts that were scheduled for the current time
-export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+async function run(request: NextRequest) {
+  const denied = authorizeCron(request);
+  if (denied) return denied;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const supabase = await createServerSupabaseClient();
-
-  // Find scheduled broadcasts that are due
+  const supabase = createAdminClient();
   const now = new Date().toISOString();
   const { data: broadcasts } = await supabase
     .from('broadcasts')
@@ -32,10 +28,15 @@ export async function POST(request: NextRequest) {
     const recipients = await getRecipients(supabase, broadcast.audience as BroadcastAudience, broadcast.branch_id);
 
     try {
+      const credentials = await getBranchWhatsAppCredentials(supabase, broadcast.branch_id);
       const sendResults = await sendBulkWhatsApp({
         recipients,
         message: broadcast.message,
         imageUrl: broadcast.image_url || undefined,
+        phoneNumberId: credentials.phoneNumberId,
+        accessToken: credentials.accessToken,
+        templateName: templateNameForMessageType(broadcast.message_type),
+        templateLanguage: 'en_US',
       });
 
       const successCount = sendResults.filter((r) => r.success).length;
@@ -66,8 +67,16 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ success: true, results });
 }
 
+export async function GET(request: NextRequest) {
+  return run(request);
+}
+
+export async function POST(request: NextRequest) {
+  return run(request);
+}
+
 async function getRecipients(
-  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  supabase: SupabaseClient,
   audience: BroadcastAudience,
   branchId: string
 ): Promise<{ phone_number: string; full_name: string }[]> {

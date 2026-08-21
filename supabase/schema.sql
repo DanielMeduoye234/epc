@@ -780,6 +780,7 @@ CREATE TABLE IF NOT EXISTS branch_settings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   branch_id UUID NOT NULL UNIQUE REFERENCES branches(id) ON DELETE CASCADE,
   whatsapp_phone TEXT,
+  whatsapp_phone_number_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

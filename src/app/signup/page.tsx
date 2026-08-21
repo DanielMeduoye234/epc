@@ -72,9 +72,14 @@ export default function SignupPage() {
       };
       if (needsBranchCode) profileBody.branchCode = branchCode.trim();
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (data.session?.access_token) {
+        headers.Authorization = `Bearer ${data.session.access_token}`;
+      }
+
       const res = await fetch('/api/auth/create-profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(profileBody),
       });
 

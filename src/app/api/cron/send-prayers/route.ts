@@ -1,53 +1,55 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { sendBulkWhatsApp } from '@/lib/whatsapp';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { authorizeCron } from '@/lib/cron-auth';
+import { getBranchWhatsAppCredentials, sendBulkWhatsApp } from '@/lib/whatsapp';
 import { NextRequest, NextResponse } from 'next/server';
 import { BroadcastAudience } from '@/lib/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-// This endpoint is called by a cron job (e.g., Supabase Edge Function or Vercel Cron)
-// It checks for prayer schedules that should be sent at the current day/time
-export async function POST(request: NextRequest) {
-  // Verify cron secret to prevent unauthorized calls
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+function timeToMinutes(hhmm: string) {
+  const [hours, minutes] = hhmm.split(':').map(Number);
+  return hours * 60 + minutes;
+}
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+async function run(request: NextRequest) {
+  const denied = authorizeCron(request);
+  if (denied) return denied;
 
-  const supabase = await createServerSupabaseClient();
-
+  const supabase = createAdminClient();
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0=Sunday
-  const currentTime = now.toTimeString().slice(0, 5); // HH:mm
+  const dayOfWeek = now.getDay();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-  // Find active prayer schedules for current day and time (within 5 min window)
   const { data: schedules } = await supabase
     .from('prayer_schedules')
     .select('*')
     .eq('is_active', true)
-    .eq('day_of_week', dayOfWeek)
-    .eq('time', currentTime);
+    .eq('day_of_week', dayOfWeek);
 
-  if (!schedules || schedules.length === 0) {
+  const due = (schedules || []).filter((schedule) => {
+    const delta = nowMinutes - timeToMinutes(schedule.time);
+    return delta >= 0 && delta < 5;
+  });
+
+  if (due.length === 0) {
     return NextResponse.json({ message: 'No prayers to send at this time' });
   }
 
   const results = [];
 
-  for (const schedule of schedules) {
+  for (const schedule of due) {
     const recipients = await getRecipients(supabase, schedule.audience as BroadcastAudience, schedule.branch_id);
-
     if (recipients.length === 0) continue;
 
     try {
+      const credentials = await getBranchWhatsAppCredentials(supabase, schedule.branch_id);
       const sendResults = await sendBulkWhatsApp({
         recipients,
         message: schedule.message,
+        phoneNumberId: credentials.phoneNumberId,
+        accessToken: credentials.accessToken,
       });
-
       const successCount = sendResults.filter((r) => r.success).length;
 
-      // Log the broadcast
       await supabase.from('broadcasts').insert({
         title: schedule.title,
         message: schedule.message,
@@ -79,8 +81,16 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ success: true, results });
 }
 
+export async function GET(request: NextRequest) {
+  return run(request);
+}
+
+export async function POST(request: NextRequest) {
+  return run(request);
+}
+
 async function getRecipients(
-  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  supabase: SupabaseClient,
   audience: BroadcastAudience,
   branchId: string
 ): Promise<{ phone_number: string; full_name: string }[]> {
@@ -111,7 +121,6 @@ async function getRecipients(
     if (data) recipients.push(...data);
   }
 
-  // Deduplicate by phone number
   const seen = new Set<string>();
   return recipients.filter((r) => {
     const phone = r.phone_number.replace(/\D/g, '');

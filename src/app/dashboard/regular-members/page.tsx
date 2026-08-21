@@ -290,7 +290,7 @@ export default function RegularMembersPage() {
         <div className="relative flex-1">
           <Search size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" placeholder="Search by name or bacenta..." value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black" />
+            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black text-sm" />
         </div>
         <div className="sm:w-56">
           <BacentaSelect
@@ -300,7 +300,7 @@ export default function RegularMembersPage() {
               { value: 'all', label: 'All Bacentas' },
               ...bacentaFilterOptions.map((name) => ({ value: name, label: name })),
             ]}
-            className="px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full"
+            className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full text-sm"
             placeholder="All Bacentas"
           />
         </div>
@@ -314,7 +314,7 @@ export default function RegularMembersPage() {
               { value: 'inactive', label: 'Inactive' },
               { value: 'flagged', label: 'Flagged' },
             ]}
-            className="px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full"
+            className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full text-sm"
             placeholder="All Status"
           />
         </div>
@@ -375,9 +375,9 @@ export default function RegularMembersPage() {
           </div>
 
           {/* Desktop Table */}
-          <div className="hidden sm:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="hidden sm:block table-shell">
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="table-compact">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
                     <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Member</th>
@@ -397,7 +397,7 @@ export default function RegularMembersPage() {
                     <tr key={member.id} className="hover:bg-orange-50/50 transition">
                       <td className="px-6 py-4">
                         <Link href={`/dashboard/profile/member/${member.id}`} className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
+                          <div className="person-avatar rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                             {member.photo_url ? (
                               <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
                             ) : (
@@ -489,6 +489,7 @@ export default function RegularMembersPage() {
             totalItems={filtered.length}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
+            embedded
           />
         </>
       )}

@@ -1,14 +1,12 @@
 import { birthdayDateForYear, createBirthdayMessage, isBirthdayToday } from '@/lib/birthdays';
+import { authorizeCron } from '@/lib/cron-auth';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { sendWhatsAppMessage } from '@/lib/whatsapp';
-import { NextResponse } from 'next/server';
+import { getBranchWhatsAppCredentials, sendWhatsAppMessage } from '@/lib/whatsapp';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(request: Request) {
-  const configuredSecret = process.env.CRON_SECRET;
-  const providedSecret = new URL(request.url).searchParams.get('secret') || request.headers.get('x-cron-secret');
-  if (configuredSecret && providedSecret !== configuredSecret) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+async function run(request: NextRequest) {
+  const denied = authorizeCron(request);
+  if (denied) return denied;
 
   const admin = createAdminClient();
   const { data: members, error } = await admin
@@ -39,7 +37,11 @@ export async function GET(request: Request) {
 
     const message = createBirthdayMessage(member.full_name);
     try {
-      await sendWhatsAppMessage({ to: member.phone_number, message });
+      await sendWhatsAppMessage({
+        to: member.phone_number,
+        message,
+        ...(await getBranchWhatsAppCredentials(admin, member.branch_id)),
+      });
       await admin.from('birthday_messages').upsert({
         member_id: member.id,
         branch_id: member.branch_id,
@@ -64,4 +66,12 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ processed: results.length, results });
+}
+
+export async function GET(request: NextRequest) {
+  return run(request);
+}
+
+export async function POST(request: NextRequest) {
+  return run(request);
 }

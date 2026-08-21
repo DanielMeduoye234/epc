@@ -15,12 +15,16 @@ Church Growth Dashboard for tracking New Believers, First Timers, and Members.
 
 ### 2. Configure Environment Variables
 
-Edit `.env.local` in the project root:
+Edit `.env.local` in the project root. Copy `.env.example` for the full list:
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+CRON_SECRET=generate-a-long-random-string
 ```
+
+Optional: WhatsApp, Google Calendar, and Fold Assistant keys are documented in `.env.example`.
 
 ### 3. Create Your First Branch and Super Admin
 
@@ -58,7 +62,8 @@ Open [http://localhost:3000](http://localhost:3000) and log in with your credent
 - **Analytics** - Visual growth charts and Bacenta distribution
 - **Attendance** - Weekly attendance marking for Shepherds
 - **Multi-Branch** - Each EPC branch has isolated data
-- **Role-Based Access** - Super Admin, Shepherd, Recorder
+- **Fold Assistant** - In-dashboard guide that explains every page and can look up live branch data
+- **Role-Based Access** - Bishop, Super Admin, Shepherd, Recorder
 
 ## Brand Colors
 
@@ -97,8 +102,14 @@ src/
 │   └── supabase/
 │       ├── client.ts               # Browser Supabase client
 │       └── server.ts               # Server Supabase client
-└── middleware.ts                    # Auth middleware
+└── middleware.ts                    # Auth middleware (Next.js 16 uses src/proxy.ts)
 ```
+
+## Fold Assistant
+
+A floating helper on every dashboard page. It answers how-to questions for the signed-in role and can look up stats, people, alerts, and birthdays.
+
+It works without an AI key (guides + live Supabase tools). For conversational answers, set one of `GROQ_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`.
 
 ## Roles
 

@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [whatsappPhone, setWhatsappPhone] = useState('');
+  const [whatsappPhoneId, setWhatsappPhoneId] = useState('');
   const [whatsappSaved, setWhatsappSaved] = useState(false);
   const [whatsappSaving, setWhatsappSaving] = useState(false);
 
@@ -33,10 +34,11 @@ export default function SettingsPage() {
     }
     const { data } = await supabase
       .from('branch_settings')
-      .select('whatsapp_phone')
+      .select('whatsapp_phone, whatsapp_phone_number_id')
       .eq('branch_id', profile!.branch_id)
       .single();
     if (data?.whatsapp_phone) setWhatsappPhone(data.whatsapp_phone);
+    if (data?.whatsapp_phone_number_id) setWhatsappPhoneId(data.whatsapp_phone_number_id);
   }
 
   async function saveWhatsAppConfig() {
@@ -47,6 +49,7 @@ export default function SettingsPage() {
         .upsert({
           branch_id: profile!.branch_id,
           whatsapp_phone: whatsappPhone,
+          whatsapp_phone_number_id: whatsappPhoneId || null,
         }, { onConflict: 'branch_id' });
     }
     setWhatsappSaving(false);
@@ -116,49 +119,54 @@ export default function SettingsPage() {
       </div>
 
       {/* Branch Info */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <h3 className="text-lg font-semibold text-black mb-2">Branch Information</h3>
-        <p className="text-gray-600">{profile.branch?.name || 'Unknown Branch'}</p>
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h3 className="text-base font-semibold text-black mb-1">Branch</h3>
+        <p className="text-sm text-gray-600">{profile.branch?.name || 'Unknown Branch'}</p>
       </div>
 
       {/* WhatsApp Configuration */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center gap-2 mb-1">
-          <MessageCircle size={20} className="text-green-500" />
-          <h3 className="text-lg font-semibold text-black">WhatsApp Configuration</h3>
+          <MessageCircle size={18} className="text-green-600" />
+          <h3 className="text-base font-semibold text-black">WhatsApp sender</h3>
         </div>
-        <p className="text-sm text-gray-500 mb-4">
-          Set the sender phone number for broadcasts and prayer reminders via WhatsApp Business API
+        <p className="text-sm text-gray-600 mb-4 max-w-2xl">
+          Sending is per branch, not per staff account. Everyone at {profile.branch?.name || 'this branch'} uses the same church WhatsApp line. Another branch can use a different Meta Phone Number ID. Individual shepherds cannot attach personal WhatsApp numbers.
         </p>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sender Phone Number</label>
+        <div className="grid gap-3 sm:grid-cols-2 max-w-3xl">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Display number</label>
             <input
               type="tel"
               value={whatsappPhone}
               onChange={(e) => setWhatsappPhone(e.target.value)}
               placeholder="+234 801 234 5678"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-black"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black text-sm"
             />
-            <p className="text-[10px] text-gray-400 mt-1">
-              Use international format. This number must be registered with WhatsApp Business API.
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Shown to your team. International format.</p>
           </div>
-          <div className="flex items-end">
-            <button
-              onClick={saveWhatsAppConfig}
-              disabled={whatsappSaving || !whatsappPhone}
-              className="flex items-center gap-2 px-5 py-2.5 bg-green-500 text-white font-medium rounded-lg hover:bg-green-600 transition disabled:opacity-50"
-            >
-              {whatsappSaved ? <Check size={18} /> : <Save size={18} />}
-              {whatsappSaving ? 'Saving...' : whatsappSaved ? 'Saved!' : 'Save'}
-            </button>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Meta Phone Number ID</label>
+            <input
+              type="text"
+              value={whatsappPhoneId}
+              onChange={(e) => setWhatsappPhoneId(e.target.value)}
+              placeholder="123456789012345"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black text-sm font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-1">From Meta WhatsApp Business. Falls back to the server default if blank.</p>
           </div>
         </div>
+        <button
+          onClick={saveWhatsAppConfig}
+          disabled={whatsappSaving}
+          className="mt-4 flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black transition disabled:opacity-50"
+        >
+          {whatsappSaved ? <Check size={16} /> : <Save size={16} />}
+          {whatsappSaving ? 'Saving...' : whatsappSaved ? 'Saved' : 'Save WhatsApp sender'}
+        </button>
         {whatsappSaved && (
-          <div className="mt-3 bg-green-50 border border-green-200 text-green-700 px-4 py-2 rounded-lg text-sm">
-            WhatsApp sender number updated successfully!
-          </div>
+          <p className="mt-2 text-sm text-green-700">Sender updated for this branch.</p>
         )}
       </div>
 
@@ -168,55 +176,71 @@ export default function SettingsPage() {
           <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
-            <h3 className="font-semibold text-black">Team Members ({users.length})</h3>
+        <div className="table-shell">
+          <div className="px-3 py-2 border-b border-gray-200">
+            <h3 className="text-sm font-semibold text-black">Team ({users.length})</h3>
           </div>
-          <div className="divide-y divide-gray-50">
-            {users.map((user) => (
-              <div key={user.id} className="flex items-center justify-between px-6 py-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-gray-700 to-black flex items-center justify-center">
-                    <span className="text-white text-sm font-bold">
-                      {user.full_name
-                        .split(' ')
-                        .map((n) => n[0])
-                        .join('')
-                        .toUpperCase()
-                        .slice(0, 2)}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="font-medium text-black">{user.full_name}</p>
-                    <p className="text-sm text-gray-500">{user.email}</p>
-                    {user.role === 'shepherd' && (
-                      <p className="text-xs text-orange-600 mt-0.5">
-                        Bacentas: {user.bacentas?.map((b) => b.name).join(', ') || user.bacenta?.name || 'Unassigned'}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {user.id === profile.id ? (
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${roleColors[user.role]}`}>
-                      {user.role.replace('_', ' ')}
-                    </span>
-                  ) : (
-                    <select
-                      value={user.role}
-                      onChange={(e) => updateRole(user.id, e.target.value as UserRole)}
-                      className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
-                    >
-                      <option value="bishop">Bishop</option>
-                      <option value="super_admin">Super Admin (Pastor)</option>
-                      <option value="shepherd">Shepherd</option>
-                      <option value="recorder">Recorder</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          {users.length === 0 ? (
+            <p className="px-3 py-8 text-sm text-gray-500 text-center">No team members yet. Invite a shepherd or officer to get started.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table-compact">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Bacenta</th>
+                    <th>Role</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.id}>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="person-avatar rounded-full bg-gray-900 flex items-center justify-center shrink-0">
+                            <span className="text-white text-[10px] font-bold">
+                              {user.full_name
+                                .split(' ')
+                                .map((n) => n[0])
+                                .join('')
+                                .toUpperCase()
+                                .slice(0, 2)}
+                            </span>
+                          </div>
+                          <span className="font-medium text-black">{user.full_name}</span>
+                        </div>
+                      </td>
+                      <td className="text-gray-600">{user.email}</td>
+                      <td className="text-gray-600">
+                        {user.role === 'shepherd'
+                          ? user.bacentas?.map((b) => b.name).join(', ') || user.bacenta?.name || 'Unassigned'
+                          : '—'}
+                      </td>
+                      <td>
+                        {user.id === profile.id ? (
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-medium capitalize ${roleColors[user.role]}`}>
+                            {user.role.replace('_', ' ')}
+                          </span>
+                        ) : (
+                          <select
+                            value={user.role}
+                            onChange={(e) => updateRole(user.id, e.target.value as UserRole)}
+                            className="px-2 py-1 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-orange-500 outline-none text-black bg-white"
+                          >
+                            <option value="bishop">Bishop</option>
+                            <option value="super_admin">Super Admin</option>
+                            <option value="shepherd">Shepherd</option>
+                            <option value="recorder">Recorder</option>
+                          </select>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

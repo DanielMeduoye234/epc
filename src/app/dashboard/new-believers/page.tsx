@@ -118,7 +118,7 @@ export default function NewBelieversPage() {
             setSearch(e.target.value);
             setCurrentPage(1);
           }}
-          className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
+            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black text-sm"
         />
       </div>
 
@@ -128,9 +128,9 @@ export default function NewBelieversPage() {
           <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="table-shell">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="table-compact">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Person</th>
@@ -148,7 +148,7 @@ export default function NewBelieversPage() {
                   <tr key={believer.id} className="hover:bg-orange-50/50 transition">
                     <td className="px-6 py-4">
                       <Link href={`/dashboard/profile/new-believer/${believer.id}`} className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
+                        <div className="person-avatar rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
                           {believer.photo_url ? (
                             <img src={believer.photo_url} alt={believer.full_name} className="w-full h-full object-cover" />
                           ) : (
@@ -226,6 +226,7 @@ export default function NewBelieversPage() {
             totalItems={filtered.length}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
+            embedded
           />
         </div>
       )}

@@ -1,7 +1,7 @@
 import { createBirthdayMessage, birthdayDateForYear } from '@/lib/birthdays';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { sendWhatsAppMessage } from '@/lib/whatsapp';
+import { getBranchWhatsAppCredentials, sendWhatsAppMessage } from '@/lib/whatsapp';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -39,7 +39,13 @@ export async function POST(request: Request) {
   const birthdayDate = birthdayDateForYear(member.birthday);
 
   try {
-    await sendWhatsAppMessage({ to: member.phone_number, message });
+    const credentials = await getBranchWhatsAppCredentials(admin, member.branch_id);
+    await sendWhatsAppMessage({
+      to: member.phone_number,
+      message,
+      phoneNumberId: credentials.phoneNumberId,
+      accessToken: credentials.accessToken,
+    });
     await admin.from('birthday_messages').upsert({
       member_id: member.id,
       branch_id: member.branch_id,

@@ -12,6 +12,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/signup') ||
     pathname.startsWith('/auth') ||
+    pathname.startsWith('/api/cron') ||
+    pathname.startsWith('/api/webhooks') ||
     pathname.startsWith('/offline') ||
     pathname === '/manifest.json' ||
     pathname === '/sw.js' ||

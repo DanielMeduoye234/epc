@@ -5,7 +5,17 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Broadcast, BroadcastAudience, MessageType } from '@/lib/types';
 import { DEMO_BROADCASTS } from '@/lib/demo-data';
-import { Send, Plus, X, Image as ImageIcon, Clock, CheckCircle, AlertCircle, Megaphone } from 'lucide-react';
+import { RECOMMENDED_TEMPLATES, templateNameForMessageType } from '@/lib/whatsapp-templates';
+import { Send, Plus, X, Image as ImageIcon, Clock, CheckCircle, AlertCircle, Megaphone, FileText, RefreshCw } from 'lucide-react';
+
+type MetaTemplate = {
+  id: string;
+  name: string;
+  status: string;
+  language: string;
+  category: string;
+  rejected_reason?: string;
+};
 
 export default function EpcNewsPage() {
   const { profile, isDemo } = useAuth();
@@ -79,6 +89,8 @@ export default function EpcNewsPage() {
           New Broadcast
         </button>
       </div>
+
+      {!isDemo && <WhatsAppTemplatesPanel />}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -177,6 +189,133 @@ export default function EpcNewsPage() {
   );
 }
 
+function statusBadge(status: string) {
+  const key = status.toUpperCase();
+  if (key === 'APPROVED') return 'bg-green-100 text-green-700';
+  if (key === 'PENDING' || key === 'IN_APPEAL') return 'bg-amber-100 text-amber-800';
+  if (key === 'REJECTED' || key === 'PAUSED' || key === 'DISABLED') return 'bg-red-100 text-red-700';
+  return 'bg-gray-100 text-gray-600';
+}
+
+function WhatsAppTemplatesPanel() {
+  const [templates, setTemplates] = useState<MetaTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  async function loadTemplates() {
+    setLoading(true);
+    const response = await fetch('/api/whatsapp/templates');
+    const data = await response.json();
+    if (!response.ok) {
+      setNotice({ type: 'error', text: data.error || 'Could not load templates from Meta.' });
+      setTemplates([]);
+    } else {
+      setTemplates(data.templates || []);
+      setNotice(null);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadTemplates();
+  }, []);
+
+  async function submitRecommended() {
+    setSubmitting(true);
+    const response = await fetch('/api/whatsapp/templates', { method: 'POST' });
+    const data = await response.json();
+    setSubmitting(false);
+    if (!response.ok) {
+      setNotice({ type: 'error', text: data.error || 'Could not submit templates.' });
+      return;
+    }
+    setTemplates(data.templates || []);
+    const created = (data.created || []).length;
+    const failed = data.failed || [];
+    if (failed.length) {
+      setNotice({
+        type: 'error',
+        text: failed.map((f: { name: string; error: string }) => `${f.name}: ${f.error}`).join(' '),
+      });
+    } else if (created) {
+      setNotice({
+        type: 'success',
+        text: `Submitted ${created} template(s) to Meta. Status starts as Pending until they approve.`,
+      });
+    } else {
+      setNotice({ type: 'success', text: 'These templates are already on Meta. Refresh if status looks stale.' });
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h3 className="font-semibold text-black flex items-center gap-2">
+            <FileText size={18} className="text-orange-500" />
+            WhatsApp templates
+          </h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Meta must approve these before EPC News can reach people who have not messaged the church number. You still type the custom details when you send.
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={loadTemplates}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <RefreshCw size={16} />
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={submitRecommended}
+            disabled={submitting}
+            className="flex items-center gap-2 px-3 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
+          >
+            {submitting ? 'Submitting...' : 'Submit 3 templates to Meta'}
+          </button>
+        </div>
+      </div>
+
+      {notice && (
+        <p className={`text-sm rounded-lg px-3 py-2 ${notice.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+          {notice.text}
+        </p>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-6">
+          <div className="w-6 h-6 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {RECOMMENDED_TEMPLATES.map((rec) => {
+            const meta = templates.find((t) => t.name === rec.name);
+            return (
+              <div key={rec.name} className="border border-gray-100 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <h4 className="font-medium text-black">{rec.label}</h4>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(meta?.status || 'Not submitted')}`}>
+                    {meta?.status || 'Not submitted'}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500 mt-2">{rec.description}</p>
+                <p className="text-xs text-gray-400 mt-3">{rec.body}</p>
+                {meta?.rejected_reason && (
+                  <p className="text-xs text-red-600 mt-2">{meta.rejected_reason}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickAction({
   title,
   description,
@@ -211,17 +350,31 @@ function BroadcastForm({
   onClose: () => void;
   onSent: () => void;
 }) {
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [sendNow, setSendNow] = useState(true);
+  const [error, setError] = useState('');
+  const [approvedTemplates, setApprovedTemplates] = useState<MetaTemplate[]>([]);
   const [form, setForm] = useState({
     title: '',
     message: '',
     image_url: '',
     audience: 'all' as BroadcastAudience,
-    message_type: 'news' as MessageType,
+    message_type: 'reminder' as MessageType,
     scheduled_at: '',
+    template_name: templateNameForMessageType('reminder'),
   });
+
+  useEffect(() => {
+    fetch('/api/whatsapp/templates')
+      .then((r) => r.json())
+      .then((data) => {
+        const approved = ((data.templates || []) as MetaTemplate[]).filter(
+          (t) => t.status?.toUpperCase() === 'APPROVED'
+        );
+        setApprovedTemplates(approved);
+      })
+      .catch(() => setApprovedTemplates([]));
+  }, []);
 
   // Message templates
   const templates = [
@@ -257,8 +410,8 @@ function BroadcastForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
 
-    // Call the send API
     const response = await fetch('/api/broadcast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -269,26 +422,16 @@ function BroadcastForm({
         send_now: sendNow,
         image_url: form.image_url || null,
         scheduled_at: sendNow ? null : form.scheduled_at || null,
+        template_name: form.template_name,
+        template_language: 'en_US',
       }),
     });
 
+    const data = await response.json().catch(() => ({}));
     if (response.ok) {
       onSent();
     } else {
-      // Still save as draft if sending fails
-      await supabase.from('broadcasts').insert({
-        title: form.title,
-        message: form.message,
-        image_url: form.image_url || null,
-        audience: form.audience,
-        message_type: form.message_type,
-        status: 'draft',
-        recipients_count: 0,
-        branch_id: branchId,
-        created_by: createdBy,
-        scheduled_at: form.scheduled_at || null,
-      });
-      onSent();
+      setError(data.error || 'Failed to send. Check that the WhatsApp template is Approved.');
     }
 
     setLoading(false);
@@ -341,15 +484,41 @@ function BroadcastForm({
               <label className="block text-sm font-medium text-gray-700 mb-1">Message Type</label>
               <select
                 value={form.message_type}
-                onChange={(e) => setForm({ ...form, message_type: e.target.value as MessageType })}
+                onChange={(e) => {
+                  const message_type = e.target.value as MessageType;
+                  setForm({
+                    ...form,
+                    message_type,
+                    template_name: templateNameForMessageType(message_type),
+                  });
+                }}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
               >
+                <option value="reminder">Sunday announcement</option>
+                <option value="event">Special event</option>
+                <option value="prayer">Church prayer</option>
                 <option value="news">News / Announcement</option>
-                <option value="event">Event</option>
-                <option value="reminder">Service Reminder</option>
-                <option value="prayer">Prayer</option>
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp template</label>
+            <select
+              value={form.template_name}
+              onChange={(e) => setForm({ ...form, template_name: e.target.value })}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
+            >
+              {RECOMMENDED_TEMPLATES.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.label}
+                  {approvedTemplates.some((a) => a.name === t.name) ? ' (Approved)' : ' (awaiting Meta)'}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              Name goes in automatically. The message box below fills the custom details.
+            </p>
           </div>
 
           <div>
@@ -425,6 +594,10 @@ function BroadcastForm({
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black"
               />
             </div>
+          )}
+
+          {error && (
+            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
 
           <div className="flex gap-3 pt-4">

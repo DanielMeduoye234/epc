@@ -1,19 +1,30 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getRequestUser, parseSignupRole } from '@/lib/request-user';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { userId, full_name, email, role, branchCode, branchName, branchLocation } = body;
+    const user = await getRequestUser(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Sign in before setting up an account.' }, { status: 401 });
+    }
 
-    if (!userId || !full_name || !role) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    const body = await request.json();
+    const { full_name, email, role, branchCode, branchName, branchLocation } = body;
+    const resolvedRole =
+      user.user_metadata?.role === 'bishop'
+        ? 'bishop'
+        : parseSignupRole(user.user_metadata?.role) || parseSignupRole(role) || 'super_admin';
+    const name = (typeof full_name === 'string' && full_name.trim()) || user.user_metadata?.full_name || '';
+
+    if (!name) {
+      return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
     }
 
     const admin = createAdminClient();
     let branchId: string;
 
-    if (role === 'super_admin' || role === 'bishop') {
+    if (resolvedRole === 'super_admin' || resolvedRole === 'bishop') {
       if (!branchName || !branchCode) {
         return NextResponse.json({ error: 'Branch name and code are required' }, { status: 400 });
       }
@@ -59,10 +70,10 @@ export async function POST(request: Request) {
     }
 
     const { error: profileError } = await admin.from('profiles').upsert({
-      id: userId,
-      full_name,
-      email: email || '',
-      role,
+      id: user.id,
+      full_name: name,
+      email: (typeof email === 'string' && email) || user.email || '',
+      role: resolvedRole,
       branch_id: branchId,
     });
 

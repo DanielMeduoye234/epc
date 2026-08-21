@@ -9,6 +9,25 @@ import { Plus, X, BookHeart, Trash2, ToggleLeft, ToggleRight } from 'lucide-reac
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+function nextSendLabel(dayOfWeek: number, time: string) {
+  const now = new Date();
+  const [hours, minutes] = time.split(':').map(Number);
+  const next = new Date(now);
+  next.setHours(hours, minutes, 0, 0);
+  const dayDiff = (dayOfWeek - now.getDay() + 7) % 7;
+  if (dayDiff === 0 && next <= now) {
+    next.setDate(next.getDate() + 7);
+  } else {
+    next.setDate(next.getDate() + dayDiff);
+  }
+  const sameWeek = next.toDateString() === now.toDateString();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (sameWeek) return `Today ${time}`;
+  if (next.toDateString() === tomorrow.toDateString()) return `Tomorrow ${time}`;
+  return `${DAYS[dayOfWeek]} ${time}`;
+}
+
 export default function PrayersPage() {
   const { profile, isDemo } = useAuth();
   const supabase = createClient();
@@ -73,7 +92,7 @@ export default function PrayersPage() {
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
+          className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition"
         >
           <Plus size={20} />
           New Prayer Schedule
@@ -81,15 +100,11 @@ export default function PrayersPage() {
       </div>
 
       {/* Info Banner */}
-      <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-start gap-3">
-        <BookHeart size={20} className="text-orange-500 mt-0.5 flex-shrink-0" />
-        <div>
-          <p className="text-sm text-orange-800 font-medium">How it works</p>
-          <p className="text-sm text-orange-700 mt-1">
-            Scheduled prayers are automatically sent to members&apos; WhatsApp on the designated day and time.
-            Each prayer is personalized with the recipient&apos;s name. Toggle schedules on/off as needed.
-          </p>
-        </div>
+      <div className="border border-gray-200 rounded-lg px-3 py-3 bg-white">
+        <p className="text-sm font-medium text-black">How sending works</p>
+        <p className="text-sm text-gray-600 mt-1">
+          Active schedules go out on the chosen day and time over the branch WhatsApp line. Messages replace {'{name}'} with each person. The job checks every 5 minutes, so a 07:00 prayer sends between 07:00 and 07:04. WhatsApp credentials must be set in Settings and on the server.
+        </p>
       </div>
 
       {/* Schedules */}
@@ -98,57 +113,72 @@ export default function PrayersPage() {
           <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : schedules.length === 0 ? (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
-          <BookHeart size={48} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-gray-400">No prayer schedules yet</p>
-          <p className="text-sm text-gray-400 mt-1">Create a schedule to start sending automated prayers</p>
+        <div className="table-shell px-4 py-10 text-center">
+          <BookHeart size={28} className="mx-auto mb-2 text-gray-400" />
+          <p className="text-sm font-medium text-black">No prayer schedules yet</p>
+          <p className="text-sm text-gray-500 mt-1">Create one to send a weekly WhatsApp prayer to a group.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {schedules.map((schedule) => (
-            <div
-              key={schedule.id}
-              className={`bg-white rounded-xl shadow-sm border p-5 transition ${
-                schedule.is_active ? 'border-orange-200' : 'border-gray-100 opacity-60'
-              }`}
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h4 className="font-semibold text-black">{schedule.title}</h4>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    {DAYS[schedule.day_of_week]} at {schedule.time} • {audienceLabels[schedule.audience]}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => toggleActive(schedule.id, schedule.is_active)}
-                    className="p-1 hover:bg-gray-100 rounded"
-                    title={schedule.is_active ? 'Deactivate' : 'Activate'}
-                  >
-                    {schedule.is_active ? (
-                      <ToggleRight size={24} className="text-orange-500" />
-                    ) : (
-                      <ToggleLeft size={24} className="text-gray-400" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => deleteSchedule(schedule.id)}
-                    className="p-1 hover:bg-red-50 rounded"
-                    title="Delete"
-                  >
-                    <Trash2 size={16} className="text-red-400" />
-                  </button>
-                </div>
-              </div>
-              <p className="text-sm text-gray-600 line-clamp-3 bg-gray-50 rounded-lg p-3">
-                {schedule.message}
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${schedule.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
-                <span className="text-xs text-gray-500">{schedule.is_active ? 'Active' : 'Paused'}</span>
-              </div>
-            </div>
-          ))}
+        <div className="table-shell overflow-x-auto">
+          <table className="table-compact">
+            <thead>
+              <tr>
+                <th>Prayer</th>
+                <th>When</th>
+                <th>Audience</th>
+                <th>Next send</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.map((schedule) => (
+                <tr key={schedule.id} className={schedule.is_active ? '' : 'opacity-60'}>
+                  <td>
+                    <p className="font-medium text-black">{schedule.title}</p>
+                    <p className="text-xs text-gray-500 line-clamp-1 max-w-xs">{schedule.message}</p>
+                  </td>
+                  <td className="whitespace-nowrap">
+                    {DAYS[schedule.day_of_week]} {schedule.time}
+                  </td>
+                  <td>{audienceLabels[schedule.audience]}</td>
+                  <td className="whitespace-nowrap text-gray-600">
+                    {schedule.is_active ? nextSendLabel(schedule.day_of_week, schedule.time) : 'Paused'}
+                  </td>
+                  <td>
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${schedule.is_active ? 'text-green-700' : 'text-gray-500'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${schedule.is_active ? 'bg-green-600' : 'bg-gray-400'}`} />
+                      {schedule.is_active ? 'Active' : 'Paused'}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(schedule.id, schedule.is_active)}
+                        className="p-1.5 hover:bg-gray-100 rounded"
+                        aria-label={schedule.is_active ? 'Pause schedule' : 'Activate schedule'}
+                      >
+                        {schedule.is_active ? (
+                          <ToggleRight size={20} className="text-orange-600" />
+                        ) : (
+                          <ToggleLeft size={20} className="text-gray-400" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteSchedule(schedule.id)}
+                        className="p-1.5 hover:bg-red-50 rounded"
+                        aria-label="Delete schedule"
+                      >
+                        <Trash2 size={14} className="text-red-500" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -194,22 +224,22 @@ function PrayerScheduleForm({
     {
       label: 'Morning Prayer',
       title: 'Morning Prayer',
-      message: 'Good morning {name}! 🌅\n\n"The Lord is my shepherd; I shall not want." - Psalm 23:1\n\nMay God\'s grace be upon you today. May He direct your steps and give you peace in every situation.\n\nHave a blessed day! 🙏',
+      message: 'Good morning {name}.\n\n"The Lord is my shepherd; I shall not want." Psalm 23:1\n\nMay God direct your steps today and give you peace in every situation.\n\nHave a blessed day.',
     },
     {
       label: 'Midweek Strength',
       title: 'Midweek Encouragement',
-      message: 'Hi {name}! 💪\n\n"I can do all things through Christ who strengthens me." - Philippians 4:13\n\nDon\'t give up! God is with you in this season. Keep pressing forward.\n\nWe are praying for you! 🔥',
+      message: 'Hi {name}.\n\n"I can do all things through Christ who strengthens me." Philippians 4:13\n\nDo not give up. God is with you in this season. We are praying for you.',
     },
     {
       label: 'Weekend Blessing',
       title: 'Weekend Blessing',
-      message: 'Happy weekend {name}! ✨\n\n"The Lord bless you and keep you; the Lord make His face shine upon you." - Numbers 6:24-25\n\nMay this weekend be filled with God\'s favor and rest.\n\nSee you in church! 🙏⛪',
+      message: 'Happy weekend {name}.\n\n"The Lord bless you and keep you; the Lord make His face shine upon you." Numbers 6:24-25\n\nMay this weekend be filled with rest and favor. See you in church.',
     },
     {
       label: 'Night Prayer',
       title: 'Night Prayer',
-      message: 'Good night {name} 🌙\n\n"He who dwells in the shelter of the Most High will rest in the shadow of the Almighty." - Psalm 91:1\n\nMay God grant you peaceful sleep and protect you through the night.\n\nRest well! 💛',
+      message: 'Good night {name}.\n\n"He who dwells in the shelter of the Most High will rest in the shadow of the Almighty." Psalm 91:1\n\nMay God grant you peaceful sleep and keep you through the night.',
     },
   ];
 

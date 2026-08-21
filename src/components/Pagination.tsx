@@ -6,6 +6,7 @@ interface PaginationProps {
   totalItems: number;
   itemsPerPage: number;
   onPageChange: (page: number) => void;
+  embedded?: boolean;
 }
 
 // Builds a compact page list like: 1 … 4 5 [6] 7 8 … 20
@@ -23,15 +24,15 @@ function getPageWindow(currentPage: number, totalPages: number): (number | 'elli
   return pages;
 }
 
-export default function Pagination({ currentPage, totalPages, totalItems, itemsPerPage, onPageChange }: PaginationProps) {
+export default function Pagination({ currentPage, totalPages, totalItems, itemsPerPage, onPageChange, embedded = false }: PaginationProps) {
   if (totalItems <= 0) return null;
 
   const from = Math.min((currentPage - 1) * itemsPerPage + 1, totalItems);
   const to = Math.min(currentPage * itemsPerPage, totalItems);
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-6 py-4 border border-gray-100 rounded-xl bg-white shadow-sm mt-4">
-      <div className="text-sm text-gray-500 text-center sm:text-left">
+    <div className={`flex flex-col sm:flex-row items-center justify-between gap-2 ${embedded ? 'px-3 py-2 border-t border-gray-100 bg-white' : 'px-3 py-2 border border-gray-200 rounded-lg bg-white mt-3'}`}>
+      <div className="text-xs text-gray-500 text-center sm:text-left">
         Showing <span className="font-semibold text-black">{from}</span> to{' '}
         <span className="font-semibold text-black">{to}</span> of{' '}
         <span className="font-semibold text-black">{totalItems}</span> entries

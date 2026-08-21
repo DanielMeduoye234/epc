@@ -1,5 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { sendBulkWhatsApp } from '@/lib/whatsapp';
+import { getBranchWhatsAppCredentials, sendBulkWhatsApp } from '@/lib/whatsapp';
+import { templateNameForMessageType } from '@/lib/whatsapp-templates';
 import { NextRequest, NextResponse } from 'next/server';
 import { BroadcastAudience } from '@/lib/types';
 
@@ -19,12 +20,24 @@ export async function POST(request: NextRequest) {
     .eq('id', user.id)
     .single();
 
-  if (!profile || profile.role !== 'super_admin') {
+  if (!profile || !['super_admin', 'bishop'].includes(profile.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const body = await request.json();
-  const { title, message, image_url, audience, message_type, branch_id, created_by, send_now, scheduled_at } = body;
+  const {
+    title,
+    message,
+    image_url,
+    audience,
+    message_type,
+    branch_id,
+    created_by,
+    send_now,
+    scheduled_at,
+    template_name,
+    template_language,
+  } = body;
 
   if (!title || !message || !audience || !branch_id) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -58,10 +71,15 @@ export async function POST(request: NextRequest) {
   // Send now
   let results;
   try {
+    const credentials = await getBranchWhatsAppCredentials(supabase, branch_id);
     results = await sendBulkWhatsApp({
       recipients,
       message,
-      imageUrl: image_url || undefined,
+      imageUrl: template_name ? undefined : image_url || undefined,
+      phoneNumberId: credentials.phoneNumberId,
+      accessToken: credentials.accessToken,
+      templateName: template_name || templateNameForMessageType(message_type),
+      templateLanguage: template_language || 'en_US',
     });
   } catch (error) {
     // Save as failed
@@ -142,8 +160,8 @@ async function getRecipients(
   // Deduplicate by phone number
   const seen = new Set<string>();
   return recipients.filter((r) => {
-    const phone = r.phone_number.replace(/\D/g, '');
-    if (seen.has(phone)) return false;
+    const phone = (r.phone_number || '').replace(/\D/g, '');
+    if (!phone || seen.has(phone)) return false;
     seen.add(phone);
     return true;
   });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { sendWhatsAppMessage } from '@/lib/whatsapp';
+import { getBranchWhatsAppCredentials, sendWhatsAppMessage } from '@/lib/whatsapp';
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,7 +34,13 @@ export async function POST(req: NextRequest) {
     let status = 'sent';
 
     try {
-      const result = await sendWhatsAppMessage({ to: phone_number, message });
+      const credentials = await getBranchWhatsAppCredentials(supabase, profile.branch_id);
+      const result = await sendWhatsAppMessage({
+        to: phone_number,
+        message,
+        phoneNumberId: credentials.phoneNumberId,
+        accessToken: credentials.accessToken,
+      });
       waMessageId = result?.messages?.[0]?.id || null;
     } catch {
       status = 'failed';
