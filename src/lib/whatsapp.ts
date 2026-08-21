@@ -280,17 +280,28 @@ export async function listWhatsAppTemplates(): Promise<WhatsAppTemplateListItem[
   const token = getWhatsAppAccessToken();
   const wabaId = getWhatsAppBusinessAccountId();
   const templates: WhatsAppTemplateListItem[] = [];
-  let url: string | null =
+  let nextUrl: string | null =
     `${WHATSAPP_API_URL}/${wabaId}/message_templates?limit=100&fields=id,name,status,language,category,rejected_reason`;
 
-  while (url) {
-    const response = await fetch(url, {
+  while (nextUrl) {
+    const requestUrl: string = nextUrl;
+    const response: Response = await fetch(requestUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw new Error(await whatsappGraphError(response));
     }
-    const json = await response.json();
+    const json = (await response.json()) as {
+      data?: Array<{
+        id: string;
+        name: string;
+        status: string;
+        language: string;
+        category: string;
+        rejected_reason?: string;
+      }>;
+      paging?: { next?: string };
+    };
     for (const row of json.data || []) {
       templates.push({
         id: row.id,
@@ -301,7 +312,7 @@ export async function listWhatsAppTemplates(): Promise<WhatsAppTemplateListItem[
         rejected_reason: row.rejected_reason,
       });
     }
-    url = json.paging?.next || null;
+    nextUrl = json.paging?.next ?? null;
   }
 
   return templates;
