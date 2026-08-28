@@ -15,6 +15,15 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: 'The Fold - Everything by Prayer',
   description: 'Church Growth Dashboard for tracking New Believers, First Timers, and Members',
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/logo.png' },
+    ],
+    apple: [
+      { url: '/logo.png' },
+    ],
+  },
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
