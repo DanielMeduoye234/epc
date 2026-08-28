@@ -10,6 +10,7 @@ import {
   ArrowLeft, MapPin, Phone, User, Calendar, Users, MessageCircle,
   Camera, Send, Gift, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import WhatsAppMessageModal from '@/components/WhatsAppMessageModal';
 
 interface PersonData {
   id: string;
@@ -43,6 +44,7 @@ export default function ProfilePage() {
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const type = params.type as string;
@@ -324,15 +326,14 @@ export default function ProfilePage() {
               <MessageCircle size={18} />
               {showChat ? 'Hide Chat' : 'Chat'}
             </button>
-            <a
-              href={`https://wa.me/${phoneClean}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => setShowWhatsAppModal(true)}
               className="flex items-center gap-2 px-5 py-2.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium shadow-sm"
             >
               <MessageCircle size={18} />
               WhatsApp
-            </a>
+            </button>
             <a
               href={`tel:${phoneClean}`}
               className="flex items-center gap-2 px-5 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium shadow-sm"
@@ -581,6 +582,22 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+
+      {/* WhatsApp Template & Flyer Modal */}
+      {person && (
+        <WhatsAppMessageModal
+          isOpen={showWhatsAppModal}
+          onClose={() => setShowWhatsAppModal(false)}
+          recipient={{
+            name: person.full_name,
+            phoneNumber: person.phone_number,
+            nickname: person.nickname,
+            photoUrl: person.photo_url,
+            bacenta: person.bacenta,
+            category: type === 'member' ? 'member' : type === 'first-timer' ? 'first_timer' : 'new_believer',
+          }}
+        />
+      )}
     </div>
   );
 }

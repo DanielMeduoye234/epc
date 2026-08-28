@@ -2,8 +2,6 @@ import { AuthProvider } from '@/components/AuthProvider';
 import Sidebar from '@/components/Sidebar';
 import AssistantWidget from '@/components/AssistantWidget';
 
-export const dynamic = 'force-dynamic';
-
 export default function DashboardLayout({
   children,
 }: {

@@ -10,25 +10,24 @@ export default function Preloader({ onFinish }: { onFinish?: () => void }) {
 
   useEffect(() => {
     // Staggered reveal
-    const t1 = setTimeout(() => setShowScene(true), 400);
-    const t2 = setTimeout(() => setShowTagline(true), 1200);
+    const t1 = setTimeout(() => setShowScene(true), 80);
+    const t2 = setTimeout(() => setShowTagline(true), 250);
 
-    // Progress bar fills over 6 seconds
+    // Progress bar fills over ~1.2 seconds
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(interval);
           return 100;
         }
-        return prev + 1;
+        return prev + 5;
       });
-    }, 60);
+    }, 50);
 
-    // Total display: ~6 seconds
     const timer = setTimeout(() => {
       setFadeOut(true);
-      setTimeout(() => onFinish?.(), 700);
-    }, 6000);
+      setTimeout(() => onFinish?.(), 250);
+    }, 1200);
 
     return () => {
       clearTimeout(t1);

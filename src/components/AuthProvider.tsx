@@ -27,74 +27,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const supabase = createClient();
     async function getProfile() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        let { data, error } = await supabase
-          .from('profiles')
-          .select('*, branch:branches(*), bacenta:bacentas(*)')
-          .eq('id', user.id)
-          .maybeSingle();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
-        if (error) {
-          const fallback = await supabase
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*, branch:branches(*)')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      let profileRow = data;
+
+      if (!profileRow && !error) {
+        const meta = user.user_metadata ?? {};
+        const res = await fetch('/api/auth/create-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            full_name: meta.full_name || '',
+            email: user.email || '',
+            role: meta.role || 'recorder',
+          }),
+        });
+        if (res.ok) {
+          const refetch = await supabase
             .from('profiles')
             .select('*, branch:branches(*)')
             .eq('id', user.id)
             .maybeSingle();
-          data = fallback.data;
-          error = fallback.error;
+          profileRow = refetch.data;
         }
-
-        // Auto-repair: if the auth user exists but has no profile row, create it now
-        if (!data && !error) {
-          const meta = user.user_metadata ?? {};
-          const res = await fetch('/api/auth/create-profile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: user.id,
-              full_name: meta.full_name || '',
-              email: user.email || '',
-              role: meta.role || 'recorder',
-            }),
-          });
-          if (res.ok) {
-            let refetch = await supabase
-              .from('profiles')
-              .select('*, branch:branches(*), bacenta:bacentas(*)')
-              .eq('id', user.id)
-              .maybeSingle();
-
-            if (refetch.error) {
-              refetch = await supabase
-                .from('profiles')
-                .select('*, branch:branches(*)')
-                .eq('id', user.id)
-                .maybeSingle();
-            }
-            data = refetch.data;
-          }
-        }
-
-        if (data) {
-          const { data: assignedBacentas, error: assignedBacentasError } = await supabase
-            .from('shepherd_bacentas')
-            .select('bacenta:bacentas(*)')
-            .eq('shepherd_id', data.id)
-            .eq('branch_id', data.branch_id);
-
-          data = {
-            ...data,
-            bacentas: assignedBacentasError
-              ? data.bacenta ? [data.bacenta] : []
-              : (assignedBacentas || [])
-                .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
-                .filter(Boolean),
-          };
-        }
-
-        setProfile(data);
       }
+
+      if (profileRow?.role === 'shepherd') {
+        const { data: assignedBacentas, error: assignedBacentasError } = await supabase
+          .from('shepherd_bacentas')
+          .select('bacenta:bacentas(*)')
+          .eq('shepherd_id', profileRow.id)
+          .eq('branch_id', profileRow.branch_id);
+
+        profileRow = {
+          ...profileRow,
+          bacentas: assignedBacentasError
+            ? profileRow.bacenta ? [profileRow.bacenta] : []
+            : (assignedBacentas || [])
+              .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
+              .filter(Boolean),
+        };
+      }
+
+      setProfile(profileRow);
       setLoading(false);
     }
     getProfile();

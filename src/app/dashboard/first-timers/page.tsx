@@ -9,6 +9,7 @@ import { Plus, Search, X, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
+import WhatsAppMessageModal, { WhatsAppRecipient } from '@/components/WhatsAppMessageModal';
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -29,6 +30,7 @@ export default function FirstTimersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editRecord, setEditRecord] = useState<FirstTimerWithAttendance | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [whatsAppRecipient, setWhatsAppRecipient] = useState<WhatsAppRecipient | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -180,10 +182,24 @@ export default function FirstTimersPage() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <span className="text-gray-600 text-sm">{ft.phone_number}</span>
-                          <a href={`https://wa.me/${ft.phone_number.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer"
-                            title="Chat on WhatsApp" onClick={(e) => e.stopPropagation()}>
-                            <WhatsAppIcon className="w-5 h-5 text-[#25D366] hover:opacity-75 transition-opacity" />
-                          </a>
+                          <button
+                            type="button"
+                            title="Send WhatsApp template / message"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setWhatsAppRecipient({
+                                name: ft.full_name,
+                                phoneNumber: ft.phone_number,
+                                nickname: ft.nickname,
+                                category: 'first_timer',
+                                bacenta: ft.bacenta,
+                                photoUrl: ft.photo_url,
+                              });
+                            }}
+                            className="p-1 hover:bg-green-50 rounded-full transition group"
+                          >
+                            <WhatsAppIcon className="w-5 h-5 text-[#25D366] group-hover:scale-110 transition-transform" />
+                          </button>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={ft.address}>{ft.address}</td>
@@ -265,6 +281,13 @@ export default function FirstTimersPage() {
           </div>
         </div>
       )}
+
+      {/* WhatsApp Template & Media Modal */}
+      <WhatsAppMessageModal
+        recipient={whatsAppRecipient}
+        isOpen={!!whatsAppRecipient}
+        onClose={() => setWhatsAppRecipient(null)}
+      />
     </div>
   );
 }

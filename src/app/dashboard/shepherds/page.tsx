@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { DEMO_MEMBERS, DEMO_USERS, DEMO_FIRST_TIMERS } from '@/lib/demo-data';
@@ -43,7 +43,7 @@ function getWeekKey(dateStr: string): string {
   return start.toISOString().split('T')[0];
 }
 
-export default function ShepherdsPage() {
+function ShepherdsContent() {
   const { profile, isDemo } = useAuth();
   const searchParams = useSearchParams();
   const selectedShepherdFromQuery = searchParams.get('shepherdId');
@@ -693,5 +693,19 @@ export default function ShepherdsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ShepherdsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-12">
+          <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <ShepherdsContent />
+    </Suspense>
   );
 }

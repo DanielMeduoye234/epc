@@ -20,21 +20,28 @@ export default function LoginPage() {
     setError(null);
 
     if (isDemoMode()) {
-      router.push('/dashboard');
+      router.replace('/dashboard');
+      setLoading(false);
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const signIn = supabase.auth.signInWithPassword({ email, password });
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Sign-in is taking too long. Check your internet connection and try again.')), 20000);
+      });
+      const { error } = await Promise.race([signIn, timeout]);
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        setError(error.message);
+        return;
+      }
+
+      router.replace('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach the server. Try again.');
+    } finally {
       setLoading(false);
-    } else {
-      router.push('/dashboard');
-      router.refresh();
     }
   };
 
