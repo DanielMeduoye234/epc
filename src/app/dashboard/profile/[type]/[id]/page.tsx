@@ -8,7 +8,7 @@ import { Attendance, ChatMessage } from '@/lib/types';
 import { isDemoMode, DEMO_NEW_BELIEVERS, DEMO_FIRST_TIMERS, DEMO_MEMBERS } from '@/lib/demo-data';
 import {
   ArrowLeft, MapPin, Phone, User, Calendar, Users, MessageCircle,
-  Camera, Send, Gift, ChevronDown, ChevronUp,
+  Camera, Send, Gift, ChevronDown, ChevronUp, Trash2, AlertTriangle,
 } from 'lucide-react';
 import WhatsAppMessageModal from '@/components/WhatsAppMessageModal';
 
@@ -45,6 +45,9 @@ export default function ProfilePage() {
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const type = params.type as string;
@@ -91,6 +94,38 @@ export default function ProfilePage() {
     setAttendance([]);
     setMessages([]);
     setLoading(false);
+  }
+
+  async function handleDelete() {
+    if (!person) return;
+    setDeleting(true);
+    setDeleteError('');
+
+    if (isDemo) {
+      router.push('/dashboard/regular-members');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/members/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_id: person.id }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setDeleteError(data.error || 'Failed to delete member.');
+        setDeleting(false);
+        return;
+      }
+
+      router.push('/dashboard/regular-members');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Network error';
+      setDeleteError(`Could not delete member: ${msg}`);
+      setDeleting(false);
+    }
   }
 
   async function fetchPerson() {
@@ -341,6 +376,16 @@ export default function ProfilePage() {
               <Phone size={18} />
               Call
             </a>
+            {type === 'member' && (
+              <button
+                type="button"
+                onClick={() => { setDeleteError(''); setShowDeleteModal(true); }}
+                className="flex items-center gap-2 px-5 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition font-medium shadow-xs sm:ml-auto"
+              >
+                <Trash2 size={18} />
+                Delete Member
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -582,6 +627,52 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && person && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => !deleting && setShowDeleteModal(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-black">Delete Member Completely</h3>
+                <p className="text-xs text-gray-500">Permanent database deletion</p>
+              </div>
+            </div>
+            <p className="text-gray-600 text-sm mb-3">
+              Are you sure you want to completely delete <strong>{person.full_name}</strong>?
+            </p>
+            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-5">
+              ⚠️ Warning: All records for this member (including attendance history, messages, and follow-ups) will be permanently deleted from the database. This action cannot be undone.
+            </p>
+            {deleteError && (
+              <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {deleteError}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button
+                disabled={deleting}
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={deleting}
+                onClick={handleDelete}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <Trash2 size={16} />
+                {deleting ? 'Deleting…' : 'Delete Member'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* WhatsApp Template & Flyer Modal */}
       {person && (

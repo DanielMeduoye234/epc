@@ -16,6 +16,7 @@ export type Permission =
   | 'members.view'
   | 'members.create'
   | 'members.edit'
+  | 'members.delete'
   | 'bacentas.view'
   | 'bacentas.manage'
   | 'attendance.view'
@@ -41,6 +42,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'members.view',
     'members.create',
     'members.edit',
+    'members.delete',
     'bacentas.view',
     'bacentas.manage',
     'attendance.view',
@@ -65,6 +67,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'members.view',
     'members.create',
     'members.edit',
+    'members.delete',
     'bacentas.view',
     'bacentas.manage',
     'attendance.view',
@@ -84,6 +87,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'members.view',
     'members.create',
     'members.edit',
+    'members.delete',
     'attendance.view',
     'attendance.mark',
   ],
