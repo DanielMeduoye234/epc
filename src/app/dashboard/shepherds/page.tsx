@@ -208,7 +208,7 @@ function ShepherdsContent() {
     });
 
     const weekKeys = Array.from(weekKeysSet).sort().slice(-6);
-    const shepherdIds = shepherdProfiles.map((sp: { id: string }) => sp.id);
+    const shepherdIds: string[] = shepherdProfiles.map((sp: { id: string }) => sp.id);
     const { data: shepherdBacentas, error: shepherdBacentasError } = shepherdIds.length > 0 ? await supabase
       .from('shepherd_bacentas')
       .select('shepherd_id, bacenta:bacentas(name)')
@@ -235,7 +235,7 @@ function ShepherdsContent() {
     // Each person counts under exactly ONE shepherd so branch totals never
     // double-count: a direct assignment wins, otherwise the (first) shepherd
     // of their bacenta owns them (case-insensitive bacenta name).
-    const shepherdIdSet = new Set(shepherdIds);
+    const shepherdIdSet = new Set<string>(shepherdIds);
     const bacentaToShepherds = buildBacentaShepherdIndex(
       Object.entries(bacentaMap).flatMap(([sid, names]) =>
         names.map((name) => ({ shepherd_id: sid, bacenta_name: name }))
