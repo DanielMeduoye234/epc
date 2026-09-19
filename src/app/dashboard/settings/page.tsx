@@ -60,7 +60,7 @@ export default function SettingsPage() {
   async function fetchUsers() {
     const { data } = await supabase
       .from('profiles')
-      .select('*, bacenta:bacentas(*), shepherd_bacentas(bacenta:bacentas(*))')
+      .select('*, bacenta:bacentas!profiles_bacenta_id_fkey(*), shepherd_bacentas(bacenta:bacentas(*))')
       .eq('branch_id', profile!.branch_id)
       .order('created_at', { ascending: false });
     const mapped = (data || []).map((user: Profile & { shepherd_bacentas?: { bacenta: Bacenta | null }[] }) => ({

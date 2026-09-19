@@ -54,7 +54,7 @@ export async function POST(request: Request) {
 
       const { data: shepherdProfile } = await admin
         .from('profiles')
-        .select('id, bacenta:bacentas(name)')
+        .select('id, bacenta:bacentas!profiles_bacenta_id_fkey(name)')
         .eq('id', callerProfile.id)
         .maybeSingle();
 

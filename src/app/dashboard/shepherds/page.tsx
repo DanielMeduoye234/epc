@@ -219,7 +219,7 @@ function ShepherdsContent() {
     if (shepherdBacentasError) {
       const { data: legacyProfiles } = await supabase
         .from('profiles')
-        .select('id, bacenta:bacentas(name)')
+        .select('id, bacenta:bacentas!profiles_bacenta_id_fkey(name)')
         .eq('branch_id', profile!.branch_id)
         .eq('role', 'shepherd');
       (legacyProfiles || []).forEach((row: { id: string; bacenta: { name: string } | null }) => {

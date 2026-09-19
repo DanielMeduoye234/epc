@@ -487,7 +487,7 @@ export default function DashboardPage() {
       // Empty assignment list (or a failed join) still honours profiles.bacenta_id.
       const { data: legacyProfile } = await supabase
         .from('profiles')
-        .select('bacenta:bacentas(name)')
+        .select('bacenta:bacentas!profiles_bacenta_id_fkey(name)')
         .eq('id', profile!.id)
         .single();
       const legacyName = (legacyProfile as { bacenta: { name: string } | null } | null)?.bacenta?.name;

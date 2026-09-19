@@ -20,14 +20,36 @@ async function resolveProfile(
 ): Promise<Profile | null> {
   const user = session.user;
 
-  // Same path that worked before the auth rewrites: direct profile read.
-  let { data: profileRow, error } = await supabase
+  // Direct profile read with explicit foreign key to prevent PostgREST PGRST201 ambiguity.
+  let { data: profileRow } = await supabase
     .from('profiles')
-    .select('*, branch:branches(*), bacenta:bacentas(*)')
+    .select('*, branch:branches(*), bacenta:bacentas!profiles_bacenta_id_fkey(*)')
     .eq('id', user.id)
     .maybeSingle();
 
-  // Fallback only if the row exists but client RLS hid it.
+  // If joined query returned nothing or failed, try plain select + separate branch fetch
+  if (!profileRow) {
+    const { data: plainRow } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (plainRow) {
+      let branch = null;
+      if (plainRow.branch_id) {
+        const { data: bData } = await supabase
+          .from('branches')
+          .select('*')
+          .eq('id', plainRow.branch_id)
+          .maybeSingle();
+        branch = bData;
+      }
+      profileRow = { ...plainRow, branch, bacenta: null };
+    }
+  }
+
+  // Fallback via service-role /api/auth/me if client RLS hid the row
   if (!profileRow) {
     try {
       const meRes = await fetch('/api/auth/me', {
@@ -43,9 +65,7 @@ async function resolveProfile(
     }
   }
 
-  // Do NOT auto-create profiles on login. Creating during a race is what
-  // shoved existing users onto the setup screen. New users use signup/setup.
-  if (!profileRow && error) {
+  if (!profileRow) {
     return null;
   }
 

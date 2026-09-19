@@ -16,14 +16,30 @@ export async function GET(request: Request) {
 
     const admin = createAdminClient();
 
-    let { data: profile, error } = await admin
+    let { data: profile } = await admin
       .from('profiles')
-      .select('*, branch:branches(*), bacenta:bacentas(*)')
+      .select('*, branch:branches(*), bacenta:bacentas!profiles_bacenta_id_fkey(*)')
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!profile) {
+      const { data: plain } = await admin
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (plain) {
+        let branch = null;
+        if (plain.branch_id) {
+          const { data: bData } = await admin
+            .from('branches')
+            .select('*')
+            .eq('id', plain.branch_id)
+            .maybeSingle();
+          branch = bData;
+        }
+        profile = { ...plain, branch, bacenta: null };
+      }
     }
 
     // Same email, different auth user id (e.g. account was recreated) — reclaim branch link.
@@ -48,7 +64,7 @@ export async function GET(request: Request) {
         if (!relinkError) {
           const relinked = await admin
             .from('profiles')
-            .select('*, branch:branches(*), bacenta:bacentas(*)')
+            .select('*, branch:branches(*), bacenta:bacentas!profiles_bacenta_id_fkey(*)')
             .eq('id', user.id)
             .maybeSingle();
           profile = relinked.data;
