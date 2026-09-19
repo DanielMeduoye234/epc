@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, MemberStatus, Bacenta } from '@/lib/types';
 import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
+import { isInShepherdFlock, normalizeBacentaName, shepherdBacentaNames } from '@/lib/flock';
 import { Search, Users, Plus, X, Lock, Pencil, UserMinus, Trash2, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
@@ -56,10 +57,8 @@ export default function RegularMembersPage() {
           shepherd_name: m.assigned_shepherd ? DEMO_USERS[m.assigned_shepherd]?.name || 'Unknown' : undefined,
         }));
         if (profile.role === 'shepherd') {
-          const bacentaNames = (profile.bacentas || []).map((b) => b.name).filter(Boolean);
-          setMembers(withNames.filter(m =>
-            m.assigned_shepherd === profile.id || bacentaNames.includes(m.bacenta)
-          ));
+          const bacentaNames = shepherdBacentaNames(profile);
+          setMembers(withNames.filter(m => isInShepherdFlock(m, profile.id, bacentaNames)));
         } else {
           setMembers(withNames);
         }
@@ -91,11 +90,13 @@ export default function RegularMembersPage() {
       // Members without a direct shepherd inherit the one assigned to their bacenta
       const bacentaShepherdMap: Record<string, string> = {};
       (bacentasLeaderRes.data || []).forEach((b: { name: string; leader_name: string | null }) => {
-        if (b.leader_name) bacentaShepherdMap[b.name] = b.leader_name;
+        const key = normalizeBacentaName(b.name);
+        if (key && b.leader_name) bacentaShepherdMap[key] = b.leader_name;
       });
       (shepherdBacentasRes.data || []).forEach((row: { shepherd: { full_name: string } | null; bacenta: { name: string } | null }) => {
-        if (row.bacenta?.name && row.shepherd?.full_name) {
-          bacentaShepherdMap[row.bacenta.name] = row.shepherd.full_name;
+        const key = normalizeBacentaName(row.bacenta?.name);
+        if (key && row.shepherd?.full_name) {
+          bacentaShepherdMap[key] = row.shepherd.full_name;
         }
       });
 
@@ -103,15 +104,13 @@ export default function RegularMembersPage() {
         ...m,
         shepherd_name:
           (m.shepherd as { full_name: string } | null)?.full_name ||
-          bacentaShepherdMap[m.bacenta as string] ||
+          bacentaShepherdMap[normalizeBacentaName(m.bacenta as string)] ||
           undefined,
       })) as MemberWithShepherd[];
 
       if (profile!.role === 'shepherd') {
-        const bacentaNames = (profile!.bacentas || []).map((b) => b.name).filter(Boolean);
-        const flock = membersWithNames.filter((m) =>
-          m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
-        );
+        const bacentaNames = shepherdBacentaNames(profile!);
+        const flock = membersWithNames.filter((m) => isInShepherdFlock(m, profile!.id, bacentaNames));
         setMembers(flock);
       } else {
         setMembers(membersWithNames);

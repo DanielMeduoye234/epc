@@ -18,6 +18,7 @@ import BranchQRCode from '@/components/BranchQRCode';
 import { getCached, setCached } from '@/lib/query-cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { migrateAttendanceHistory } from '@/lib/attendance-integrity';
+import { isLikelySamePerson, phonesOverlap } from '@/lib/flock';
 
 type ExistingMemberRow = { id: string; first_timer_id: string | null; full_name: string; phone_number: string };
 
@@ -59,8 +60,8 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
       const count = ftCounts[ft.id] || 0;
       const existingCandidates = memberRows.filter((member) =>
         member.first_timer_id === ft.id ||
-        member.full_name.toLowerCase().trim() === ft.full_name.toLowerCase().trim() ||
-        (ft.phone_number && member.phone_number.trim() === ft.phone_number.trim())
+        isLikelySamePerson(member, ft) ||
+        phonesOverlap(member.phone_number, ft.phone_number)
       );
       if (count >= 2 && existingCandidates.length === 1) {
         const existingMember = existingCandidates[0];
@@ -119,9 +120,11 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
 
     for (const nb of newBelievers) {
       const count = nbCounts[nb.id] || 0;
+      // Match by name+phone overlap (or phone groups for dual numbers). Never
+      // treat the recorder as the shepherd — leave assignment null so bacenta
+      // ownership stays the source of truth until an admin assigns someone.
       const existingCandidates = memberRows.filter((member) =>
-        member.full_name.toLowerCase().trim() === nb.full_name.toLowerCase().trim() ||
-        (nb.phone_number && member.phone_number.trim() === nb.phone_number.trim())
+        isLikelySamePerson(member, nb) || phonesOverlap(member.phone_number, nb.phone_number)
       );
       const isAlreadyMember = existingCandidates.length > 0;
       if (count >= 2 && existingCandidates.length === 1) {
@@ -137,7 +140,7 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           who_brought: nb.who_brought,
           date_joined: nb.date_saved,
           membership_date: new Date().toISOString().split('T')[0],
-          assigned_shepherd: nb.recorded_by,
+          assigned_shepherd: null,
           branch_id: nb.branch_id,
           status: 'active'
         }).select('id').maybeSingle();

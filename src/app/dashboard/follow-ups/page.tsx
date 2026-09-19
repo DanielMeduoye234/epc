@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { FollowUp, FollowUpType, FollowUpStatus } from '@/lib/types';
 import { DEMO_FOLLOWUPS, DEMO_MEMBERS } from '@/lib/demo-data';
+import { isShepherdCareRecord, shepherdBacentaNames } from '@/lib/flock';
 import { Phone, MessageCircle, MapPin, BookOpen, Plus, X, CheckCircle, XCircle, Clock, Pencil, Trash2 } from 'lucide-react';
 
 export default function FollowUpsPage() {
@@ -19,7 +20,12 @@ export default function FollowUpsPage() {
   useEffect(() => {
     if (profile) {
       if (isDemo) {
-        setFollowUps(DEMO_FOLLOWUPS);
+        const rows = profile.role === 'shepherd'
+          ? DEMO_FOLLOWUPS.filter((f) =>
+              isShepherdCareRecord(f, profile.id, shepherdBacentaNames(profile))
+            )
+          : DEMO_FOLLOWUPS;
+        setFollowUps(rows);
         setLoading(false);
       } else {
         fetchFollowUps();
@@ -30,13 +36,26 @@ export default function FollowUpsPage() {
   async function fetchFollowUps() {
     const { data } = await supabase
       .from('follow_ups')
-      .select('*, member:members(full_name)')
+      .select('*, member:members(full_name, bacenta, assigned_shepherd)')
       .eq('branch_id', profile!.branch_id)
       .order('date', { ascending: false });
-    const mapped = (data || []).map((f: Record<string, unknown>) => ({
-      ...f,
-      member_name: (f.member as { full_name: string } | null)?.full_name || 'Unknown',
-    }));
+    const bacentaNames = shepherdBacentaNames(profile!);
+    const mapped = (data || [])
+      .filter((f: Record<string, unknown>) =>
+        profile!.role !== 'shepherd' ||
+        isShepherdCareRecord(
+          {
+            shepherd_id: f.shepherd_id as string | null,
+            member: f.member as { assigned_shepherd?: string | null; bacenta?: string | null } | null,
+          },
+          profile!.id,
+          bacentaNames
+        )
+      )
+      .map((f: Record<string, unknown>) => ({
+        ...f,
+        member_name: (f.member as { full_name: string } | null)?.full_name || 'Unknown',
+      }));
     setFollowUps(mapped as FollowUp[]);
     setLoading(false);
   }

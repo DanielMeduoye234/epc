@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Profile, UserRole } from '@/lib/types';
 import { articlesForRole, type AssistantLink } from './knowledge';
+import { isInShepherdFlock, isShepherdCareRecord } from '@/lib/flock';
 
 export type AssistantToolName =
   | 'get_help'
@@ -164,20 +165,22 @@ async function runStats(supabase: SupabaseClient, profile: Profile): Promise<Too
     return { text: 'Your role does not include membership stats.', links };
   }
 
-  let memberQuery = supabase.from('members').select('id, status', { count: 'exact' }).eq('branch_id', branchId);
+  const { data: allMembers } = await supabase
+    .from('members')
+    .select('id, status, bacenta, assigned_shepherd')
+    .eq('branch_id', branchId);
+
+  let list = allMembers || [];
   if (profile.role === 'shepherd') {
     const { bacentaNames } = await shepherdScope(supabase, profile);
-    const orFilter = [`assigned_shepherd.eq.${profile.id}`, ...bacentaNames.map((name) => `bacenta.eq.${name}`)].join(',');
-    memberQuery = memberQuery.or(orFilter);
+    list = list.filter((m) => isInShepherdFlock(m, profile.id, bacentaNames));
   }
 
-  const [{ data: members }, { count: nb }, { count: ft }] = await Promise.all([
-    memberQuery,
+  const [{ count: nb }, { count: ft }] = await Promise.all([
     supabase.from('new_believers').select('id', { count: 'exact', head: true }).eq('branch_id', branchId),
     supabase.from('first_timers').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('status', 'first_timer'),
   ]);
 
-  const list = members || [];
   const flagged = list.filter((m) => m.status === 'flagged').length;
   const inactive = list.filter((m) => m.status === 'inactive').length;
 
@@ -231,19 +234,19 @@ async function runSearch(
   }
 
   if (canMembers) {
-    let memberQuery = supabase
+    const { data: members } = await supabase
       .from('members')
-      .select('id, full_name, phone_number, bacenta, status')
+      .select('id, full_name, phone_number, bacenta, status, assigned_shepherd')
       .eq('branch_id', branchId)
       .or(`full_name.ilike.${like},phone_number.ilike.${like}`)
-      .limit(8);
-    if (profile.role === 'shepherd') {
-      const { bacentaNames } = await shepherdScope(supabase, profile);
-      const orFilter = [`assigned_shepherd.eq.${profile.id}`, ...bacentaNames.map((name) => `bacenta.eq.${name}`)].join(',');
-      memberQuery = memberQuery.or(orFilter);
-    }
-    const { data: members } = await memberQuery;
-    for (const row of members || []) {
+      .limit(40);
+    const { bacentaNames } = profile.role === 'shepherd'
+      ? await shepherdScope(supabase, profile)
+      : { bacentaNames: [] as string[] };
+    const scoped = (members || []).filter((row) =>
+      profile.role !== 'shepherd' || isInShepherdFlock(row, profile.id, bacentaNames)
+    );
+    for (const row of scoped.slice(0, 8)) {
       results.push({
         name: row.full_name,
         kind: `Member (${row.status})`,
@@ -265,29 +268,44 @@ async function runSearch(
 }
 
 async function runAlerts(supabase: SupabaseClient, profile: Profile): Promise<ToolResult> {
-  const { data: alerts } = await supabase
+  const { data: alertRows } = await supabase
     .from('alerts')
-    .select('id, type, priority, title, message, is_read, member_id')
+    .select('id, type, priority, title, message, is_read, member_id, shepherd_id, member:members(bacenta, assigned_shepherd)')
     .eq('branch_id', profile.branch_id)
     .order('created_at', { ascending: false })
-    .limit(8);
+    .limit(20);
+
+  let alerts = alertRows || [];
+  if (profile.role === 'shepherd') {
+    const { bacentaNames } = await shepherdScope(supabase, profile);
+    alerts = alerts.filter((a) =>
+      isShepherdCareRecord(
+        {
+          shepherd_id: a.shepherd_id,
+          member: Array.isArray(a.member) ? a.member[0] : a.member,
+        },
+        profile.id,
+        bacentaNames
+      )
+    );
+  }
+  alerts = alerts.slice(0, 8);
 
   let flaggedNote = '';
   if (canSeeMembers(profile.role)) {
-    let flaggedQuery = supabase
+    const { data: flaggedRows } = await supabase
       .from('members')
-      .select('id, full_name, status')
+      .select('id, full_name, status, bacenta, assigned_shepherd')
       .eq('branch_id', profile.branch_id)
       .eq('status', 'flagged')
-      .limit(8);
+      .limit(40);
+    let flagged = flaggedRows || [];
     if (profile.role === 'shepherd') {
       const { bacentaNames } = await shepherdScope(supabase, profile);
-      flaggedQuery = flaggedQuery.or(
-        [`assigned_shepherd.eq.${profile.id}`, ...bacentaNames.map((name) => `bacenta.eq.${name}`)].join(',')
-      );
+      flagged = flagged.filter((m) => isInShepherdFlock(m, profile.id, bacentaNames));
     }
-    const { data: flagged } = await flaggedQuery;
-    if (flagged && flagged.length > 0) {
+    flagged = flagged.slice(0, 8);
+    if (flagged.length > 0) {
       flaggedNote = `\n\nFlagged members:\n${flagged.map((m) => `- ${m.full_name}`).join('\n')}`;
     } else {
       flaggedNote = '\n\nNo flagged members in your view.';
@@ -316,14 +334,20 @@ async function runBirthdays(supabase: SupabaseClient, profile: Profile): Promise
 
   const { data: members } = await supabase
     .from('members')
-    .select('id, full_name, birthday, phone_number')
+    .select('id, full_name, birthday, phone_number, bacenta, assigned_shepherd')
     .eq('branch_id', profile.branch_id)
     .not('birthday', 'is', null)
     .eq('status', 'active')
     .limit(200);
 
+  let scoped = members || [];
+  if (profile.role === 'shepherd') {
+    const { bacentaNames } = await shepherdScope(supabase, profile);
+    scoped = scoped.filter((m) => isInShepherdFlock(m, profile.id, bacentaNames));
+  }
+
   const now = new Date();
-  const upcoming = (members || [])
+  const upcoming = scoped
     .map((member) => {
       if (!member.birthday) return null;
       const date = new Date(`${member.birthday}T00:00:00`);

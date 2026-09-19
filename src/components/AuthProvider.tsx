@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('*, branch:branches(*)')
+        .select('*, branch:branches(*), bacenta:bacentas(*)')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (res.ok) {
           const refetch = await supabase
             .from('profiles')
-            .select('*, branch:branches(*)')
+            .select('*, branch:branches(*), bacenta:bacentas(*)')
             .eq('id', user.id)
             .maybeSingle();
           profileRow = refetch.data;
@@ -73,13 +73,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq('shepherd_id', profileRow.id)
           .eq('branch_id', profileRow.branch_id);
 
+        const assigned = assignedBacentasError
+          ? []
+          : (assignedBacentas || [])
+              .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
+              .filter(Boolean);
+        // Empty shepherd_bacentas is not an error — still honour profiles.bacenta_id.
         profileRow = {
           ...profileRow,
-          bacentas: assignedBacentasError
-            ? profileRow.bacenta ? [profileRow.bacenta] : []
-            : (assignedBacentas || [])
-              .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
-              .filter(Boolean),
+          bacentas: assigned.length > 0
+            ? assigned
+            : profileRow.bacenta ? [profileRow.bacenta] : [],
         };
       }
 

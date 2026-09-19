@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { isInShepherdFlock, shepherdBacentaNames } from '@/lib/flock';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -51,32 +52,33 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Forbidden: Member belongs to another branch' }, { status: 403 });
       }
 
-      // Check if shepherd is assigned directly or leads the member's bacenta
-      const isDirectShepherd = member.assigned_shepherd === callerProfile.id;
+      const { data: shepherdProfile } = await admin
+        .from('profiles')
+        .select('id, bacenta:bacentas(name)')
+        .eq('id', callerProfile.id)
+        .maybeSingle();
 
-      let isBacentaShepherd = false;
-      if (!isDirectShepherd && member.bacenta) {
-        const { data: shepherdBacentas } = await admin
-          .from('shepherd_bacentas')
-          .select('bacenta:bacentas(name)')
-          .eq('shepherd_id', callerProfile.id)
-          .eq('branch_id', callerProfile.branch_id);
+      const { data: shepherdBacentas } = await admin
+        .from('shepherd_bacentas')
+        .select('bacenta:bacentas(name)')
+        .eq('shepherd_id', callerProfile.id)
+        .eq('branch_id', callerProfile.branch_id);
 
-        type ShepherdBacentaJoin = { bacenta: { name: string } | { name: string }[] | null };
-        const assignedBacentaNames = ((shepherdBacentas || []) as unknown as ShepherdBacentaJoin[])
-          .map((row) => {
-            const b = row?.bacenta;
-            if (Array.isArray(b)) return b[0]?.name;
-            return b?.name;
-          })
-          .filter((name): name is string => Boolean(name));
+      type ShepherdBacentaJoin = { bacenta: { name: string } | { name: string }[] | null };
+      const assignedBacentaNames = ((shepherdBacentas || []) as unknown as ShepherdBacentaJoin[])
+        .map((row) => {
+          const b = row?.bacenta;
+          if (Array.isArray(b)) return b[0]?.name;
+          return b?.name;
+        })
+        .filter((name): name is string => Boolean(name));
 
-        if (assignedBacentaNames.includes(member.bacenta)) {
-          isBacentaShepherd = true;
-        }
-      }
+      const bacentaNames = shepherdBacentaNames({
+        bacentas: assignedBacentaNames.map((name) => ({ name })),
+        bacenta: (shepherdProfile as { bacenta?: { name: string } | null } | null)?.bacenta || null,
+      });
 
-      if (!isDirectShepherd && !isBacentaShepherd) {
+      if (!isInShepherdFlock(member, callerProfile.id, bacentaNames)) {
         return NextResponse.json(
           { error: 'Forbidden: You can only delete members under your direct care or bacenta' },
           { status: 403 }

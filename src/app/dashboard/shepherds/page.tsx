@@ -7,6 +7,7 @@ import { DEMO_MEMBERS, DEMO_USERS, DEMO_FIRST_TIMERS } from '@/lib/demo-data';
 import { Users, TrendingUp, TrendingDown, Eye, Phone, MapPin, Calendar, ChevronDown, ChevronUp, Award, AlertTriangle, Trash2, X } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { buildBacentaShepherdIndex, exclusiveShepherdOwner } from '@/lib/flock';
 
 interface ShepherdProfile {
   id: string;
@@ -233,19 +234,15 @@ function ShepherdsContent() {
 
     // Each person counts under exactly ONE shepherd so branch totals never
     // double-count: a direct assignment wins, otherwise the (first) shepherd
-    // of their bacenta owns them.
+    // of their bacenta owns them (case-insensitive bacenta name).
     const shepherdIdSet = new Set(shepherdIds);
-    const bacentaToShepherds: Record<string, string[]> = {};
-    Object.entries(bacentaMap).forEach(([sid, names]) => {
-      names.forEach((name) => {
-        if (!bacentaToShepherds[name]) bacentaToShepherds[name] = [];
-        bacentaToShepherds[name].push(sid);
-      });
-    });
+    const bacentaToShepherds = buildBacentaShepherdIndex(
+      Object.entries(bacentaMap).flatMap(([sid, names]) =>
+        names.map((name) => ({ shepherd_id: sid, bacenta_name: name }))
+      )
+    );
     const ownerOf = (p: { assigned_shepherd: string | null; bacenta: string }): string | null =>
-      p.assigned_shepherd && shepherdIdSet.has(p.assigned_shepherd)
-        ? p.assigned_shepherd
-        : (bacentaToShepherds[p.bacenta] || [])[0] || null;
+      exclusiveShepherdOwner(p, shepherdIdSet, bacentaToShepherds);
 
     const result: ShepherdProfile[] = shepherdProfiles.map((sp: { id: string; full_name: string; email: string }) => {
       const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null; bacenta: string }) =>

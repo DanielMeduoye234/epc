@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import React from 'react';
 import { migrateAttendanceHistory } from '@/lib/attendance-integrity';
+import { isInShepherdFlock, isLikelySamePerson, phonesOverlap, shepherdBacentaNames } from '@/lib/flock';
 
 interface MemberWithHistory extends Member {
   recentWeeks?: boolean[];
@@ -38,15 +39,10 @@ interface ShepherdStats {
 function dedupePeople(list: MemberWithHistory[]): MemberWithHistory[] {
   const priority: Record<string, number> = { member: 0, first_timer: 1, new_believer: 2 };
   const sorted = [...list].sort((a, b) => (priority[a.person_type] ?? 3) - (priority[b.person_type] ?? 3));
-  const seenNames = new Set<string>();
-  const seenPhones = new Set<string>();
   const result: MemberWithHistory[] = [];
   for (const person of sorted) {
-    const name = person.full_name.toLowerCase().trim();
-    const phone = (person.phone_number || '').replace(/\D/g, '');
-    if (seenNames.has(name) || (phone && seenPhones.has(phone))) continue;
-    seenNames.add(name);
-    if (phone) seenPhones.add(phone);
+    const duplicate = result.some((kept) => isLikelySamePerson(kept, person));
+    if (duplicate) continue;
     result.push(person);
   }
   return result;
@@ -93,8 +89,8 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
       const count = ftCounts[ft.id] || 0;
       const existingCandidates = memberRows.filter((member) =>
         member.first_timer_id === ft.id ||
-        member.full_name.toLowerCase().trim() === ft.full_name.toLowerCase().trim() ||
-        (ft.phone_number && member.phone_number.trim() === ft.phone_number.trim())
+        isLikelySamePerson(member, ft) ||
+        phonesOverlap(member.phone_number, ft.phone_number)
       );
       if (count >= 2 && existingCandidates.length === 1) {
         await migrateAttendanceHistory(supabase, ft.id, 'first_timer', existingCandidates[0].id, branchId);
@@ -157,8 +153,7 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
     for (const nb of newBelievers) {
       const count = nbCounts[nb.id] || 0;
       const existingCandidates = memberRows.filter((member) =>
-        member.full_name.toLowerCase().trim() === nb.full_name.toLowerCase().trim() ||
-        (nb.phone_number && member.phone_number.trim() === nb.phone_number.trim())
+        isLikelySamePerson(member, nb) || phonesOverlap(member.phone_number, nb.phone_number)
       );
       const isAlreadyMember = existingCandidates.length > 0;
       if (count >= 2 && existingCandidates.length === 1) {
@@ -174,7 +169,7 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
           who_brought: nb.who_brought,
           date_joined: nb.date_saved,
           membership_date: new Date().toISOString().split('T')[0],
-          assigned_shepherd: nb.recorded_by,
+          assigned_shepherd: null,
           branch_id: nb.branch_id,
           status: 'active'
         }).select('id').maybeSingle();
@@ -241,7 +236,7 @@ export default function AttendancePage() {
           ...nb,
           person_type: 'new_believer',
           date_joined: nb.date_saved,
-          assigned_shepherd: nb.recorded_by,
+          assigned_shepherd: null,
           status: 'active'
         })) as unknown as MemberWithHistory[];
 
@@ -256,10 +251,8 @@ export default function AttendancePage() {
         });
 
         if (profile.role === 'shepherd') {
-          const bacentaNames = (profile.bacentas || []).map((b) => b.name).filter(Boolean);
-          setMembers(membersWithHistory.filter(m =>
-            m.assigned_shepherd === profile.id || bacentaNames.includes(m.bacenta)
-          ));
+          const bacentaNames = shepherdBacentaNames(profile);
+          setMembers(membersWithHistory.filter(m => isInShepherdFlock(m, profile.id, bacentaNames)));
         } else {
           setMembers(membersWithHistory);
         }
@@ -327,16 +320,16 @@ export default function AttendancePage() {
       ...x,
       person_type: 'new_believer',
       date_joined: x.date_saved,
-      assigned_shepherd: x.recorded_by,
+      assigned_shepherd: null,
       status: 'active'
     })) as unknown as MemberWithHistory[];
 
     let membersList = dedupePeople([...mList, ...ftList, ...nbList]);
 
     if (profile!.role === 'shepherd') {
-      const bacentaNames = (profile!.bacentas || []).map((b) => b.name).filter(Boolean);
+      const bacentaNames = shepherdBacentaNames(profile!);
       membersList = membersList.filter((m: MemberWithHistory) =>
-        m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
+        isInShepherdFlock(m, profile!.id, bacentaNames)
       );
     }
 

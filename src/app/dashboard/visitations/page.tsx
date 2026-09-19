@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Visitation } from '@/lib/types';
 import { DEMO_VISITATIONS, DEMO_MEMBERS } from '@/lib/demo-data';
+import { isShepherdCareRecord, shepherdBacentaNames } from '@/lib/flock';
 import { MapPin, Plus, CheckCircle, Circle, Calendar, X, Pencil, Trash2 } from 'lucide-react';
 
 export default function VisitationsPage() {
@@ -19,7 +20,12 @@ export default function VisitationsPage() {
   useEffect(() => {
     if (profile) {
       if (isDemo) {
-        setVisitations(DEMO_VISITATIONS);
+        const rows = profile.role === 'shepherd'
+          ? DEMO_VISITATIONS.filter((v) =>
+              isShepherdCareRecord(v, profile.id, shepherdBacentaNames(profile))
+            )
+          : DEMO_VISITATIONS;
+        setVisitations(rows);
         setLoading(false);
       } else {
         fetchVisitations();
@@ -30,13 +36,26 @@ export default function VisitationsPage() {
   async function fetchVisitations() {
     const { data } = await supabase
       .from('visitations')
-      .select('*, member:members(full_name)')
+      .select('*, member:members(full_name, bacenta, assigned_shepherd)')
       .eq('branch_id', profile!.branch_id)
       .order('scheduled_date', { ascending: false });
-    const mapped = (data || []).map((v: Record<string, unknown>) => ({
-      ...v,
-      member_name: (v.member as { full_name: string } | null)?.full_name || 'Unknown',
-    }));
+    const bacentaNames = shepherdBacentaNames(profile!);
+    const mapped = (data || [])
+      .filter((v: Record<string, unknown>) =>
+        profile!.role !== 'shepherd' ||
+        isShepherdCareRecord(
+          {
+            shepherd_id: v.shepherd_id as string | null,
+            member: v.member as { assigned_shepherd?: string | null; bacenta?: string | null } | null,
+          },
+          profile!.id,
+          bacentaNames
+        )
+      )
+      .map((v: Record<string, unknown>) => ({
+        ...v,
+        member_name: (v.member as { full_name: string } | null)?.full_name || 'Unknown',
+      }));
     setVisitations(mapped as Visitation[]);
     setLoading(false);
   }

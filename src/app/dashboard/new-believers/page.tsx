@@ -198,7 +198,11 @@ export default function NewBelieversPage() {
                         {believer.recorder_name || 'Unknown'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-gray-600">{new Date(believer.date_saved).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {believer.date_saved
+                        ? new Date(believer.date_saved).toLocaleDateString()
+                        : '—'}
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-1">
                         <button

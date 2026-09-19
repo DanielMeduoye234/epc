@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Alert } from '@/lib/types';
 import { DEMO_ALERTS } from '@/lib/demo-data';
+import { isShepherdCareRecord, shepherdBacentaNames } from '@/lib/flock';
 import { Bell, AlertTriangle, Cake, TrendingUp, CheckCircle, X } from 'lucide-react';
 import Link from 'next/link';
 
@@ -18,7 +19,12 @@ export default function AlertsPage() {
   useEffect(() => {
     if (profile) {
       if (isDemo) {
-        setAlerts(DEMO_ALERTS);
+        const rows = profile.role === 'shepherd'
+          ? DEMO_ALERTS.filter((a) =>
+              isShepherdCareRecord(a, profile.id, shepherdBacentaNames(profile))
+            )
+          : DEMO_ALERTS;
+        setAlerts(rows);
         setLoading(false);
       } else {
         fetchAlerts();
@@ -29,10 +35,16 @@ export default function AlertsPage() {
   async function fetchAlerts() {
     const { data } = await supabase
       .from('alerts')
-      .select('*')
+      .select('*, member:members(full_name, bacenta, assigned_shepherd)')
       .eq('branch_id', profile!.branch_id)
       .order('created_at', { ascending: false });
-    setAlerts((data || []) as Alert[]);
+    const bacentaNames = shepherdBacentaNames(profile!);
+    const rows = ((data || []) as Array<Alert & { member?: { assigned_shepherd?: string | null; bacenta?: string | null } | null }>)
+      .filter((a) =>
+        profile!.role !== 'shepherd' ||
+        isShepherdCareRecord(a, profile!.id, bacentaNames)
+      );
+    setAlerts(rows as Alert[]);
     setLoading(false);
   }
 
@@ -46,7 +58,14 @@ export default function AlertsPage() {
   const markAllRead = async () => {
     setAlerts(prev => prev.map(a => ({ ...a, is_read: true })));
     if (!isDemo) {
-      await supabase.from('alerts').update({ is_read: true }).eq('branch_id', profile!.branch_id);
+      if (profile!.role === 'shepherd') {
+        const ids = alerts.map((a) => a.id);
+        if (ids.length > 0) {
+          await supabase.from('alerts').update({ is_read: true }).in('id', ids);
+        }
+      } else {
+        await supabase.from('alerts').update({ is_read: true }).eq('branch_id', profile!.branch_id);
+      }
     }
   };
 

@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { Heart, UserPlus, Users, AlertTriangle, CheckCircle, XCircle, TrendingUp, Building2, Bell, MapPin, Phone } from 'lucide-react';
 import { isDemoMode, DEMO_NEW_BELIEVERS, DEMO_FIRST_TIMERS, DEMO_MEMBERS, DEMO_USERS, DEMO_BRANCHES, DEMO_BRANCH_STATS, DEMO_ALERTS } from '@/lib/demo-data';
 import { getCached, setCached } from '@/lib/query-cache';
+import { isInShepherdFlock, shepherdBacentaNames } from '@/lib/flock';
 import type { Profile } from '@/lib/types';
 import Link from 'next/link';
 import {
@@ -34,6 +35,8 @@ interface ShepherdStats {
   activeSheep: number;
   flaggedSheep: number;
   inactiveSheep: number;
+  /** First timers + new believers in the shepherd's bacentas (Shepherd's Data). */
+  careExtras: number;
 }
 
 interface SheepAttendance {
@@ -176,6 +179,7 @@ export default function DashboardPage() {
     activeSheep: 0,
     flaggedSheep: 0,
     inactiveSheep: 0,
+    careExtras: 0,
   });
   const [sheepList, setSheepList] = useState<SheepAttendance[]>([]);
 
@@ -203,7 +207,10 @@ export default function DashboardPage() {
       else {
         const cached = getCached<ShepherdSnapshot>(`dash-shepherd:${profile.id}`);
         if (cached) {
-          setShepherdStats(cached.shepherdStats);
+          setShepherdStats({
+            ...cached.shepherdStats,
+            careExtras: cached.shepherdStats.careExtras ?? 0,
+          });
           setSheepList(cached.sheepList);
           setLoading(false);
         }
@@ -415,16 +422,22 @@ export default function DashboardPage() {
   }
 
   function loadShepherdDemoData() {
-    const sheep = DEMO_MEMBERS;
+    const bacentaNames = shepherdBacentaNames(profile!);
+    const sheep = DEMO_MEMBERS.filter((m) => isInShepherdFlock(m, profile!.id, bacentaNames));
     const active = sheep.filter(m => m.status === 'active').length;
     const flagged = sheep.filter(m => m.status === 'flagged').length;
     const inactive = sheep.filter(m => m.status === 'inactive').length;
+
+    const careExtras =
+      DEMO_FIRST_TIMERS.filter((ft) => ft.status === 'first_timer' && isInShepherdFlock(ft, profile!.id, bacentaNames)).length +
+      DEMO_NEW_BELIEVERS.filter((nb) => isInShepherdFlock({ ...nb, assigned_shepherd: null }, profile!.id, bacentaNames)).length;
 
     setShepherdStats({
       totalSheep: sheep.length,
       activeSheep: active,
       flaggedSheep: flagged,
       inactiveSheep: inactive,
+      careExtras,
     });
 
     // Generate mock attendance data for each sheep
@@ -465,8 +478,13 @@ export default function DashboardPage() {
       .eq('shepherd_id', profile!.id);
 
     let bacentaNames: string[] = [];
-    if (shepherdBacentasError) {
-      // Legacy schema: a shepherd was linked to a single bacenta via profiles.bacenta_id
+    if (!shepherdBacentasError) {
+      bacentaNames = (shepherdBacentas || [])
+        .map((row: { bacenta: { name: string } | null }) => row.bacenta?.name)
+        .filter(Boolean) as string[];
+    }
+    if (bacentaNames.length === 0) {
+      // Empty assignment list (or a failed join) still honours profiles.bacenta_id.
       const { data: legacyProfile } = await supabase
         .from('profiles')
         .select('bacenta:bacentas(name)')
@@ -474,10 +492,6 @@ export default function DashboardPage() {
         .single();
       const legacyName = (legacyProfile as { bacenta: { name: string } | null } | null)?.bacenta?.name;
       if (legacyName) bacentaNames = [legacyName];
-    } else {
-      bacentaNames = (shepherdBacentas || [])
-        .map((row: { bacenta: { name: string } | null }) => row.bacenta?.name)
-        .filter(Boolean) as string[];
     }
 
     const { data: allMembers } = await supabase
@@ -486,9 +500,30 @@ export default function DashboardPage() {
       .eq('branch_id', profile!.branch_id)
       .order('full_name');
 
+    const [{ data: flockFirstTimers }, { data: flockNewBelievers }] = await Promise.all([
+      supabase
+        .from('first_timers')
+        .select('id, bacenta, assigned_shepherd')
+        .eq('branch_id', profile!.branch_id)
+        .eq('status', 'first_timer'),
+      supabase
+        .from('new_believers')
+        .select('id, bacenta')
+        .eq('branch_id', profile!.branch_id),
+    ]);
+
     const sheep = (allMembers || []).filter((m: { assigned_shepherd: string | null; bacenta: string }) =>
-      m.assigned_shepherd === profile!.id || bacentaNames.includes(m.bacenta)
+      isInShepherdFlock(m, profile!.id, bacentaNames)
     );
+
+    // Same flock rule as Shepherd's Data — count only, do not rewrite rows.
+    const careExtras =
+      (flockFirstTimers || []).filter((ft: { assigned_shepherd: string | null; bacenta: string }) =>
+        isInShepherdFlock(ft, profile!.id, bacentaNames)
+      ).length +
+      (flockNewBelievers || []).filter((nb: { bacenta: string }) =>
+        isInShepherdFlock({ bacenta: nb.bacenta, assigned_shepherd: null }, profile!.id, bacentaNames)
+      ).length;
 
     const members: Array<{ id: string; full_name: string; photo_url: string | null; status: string; created_at: string }> = sheep;
     const active = members.filter(m => m.status === 'active').length;
@@ -500,6 +535,7 @@ export default function DashboardPage() {
       activeSheep: active,
       flaggedSheep: flagged,
       inactiveSheep: inactive,
+      careExtras,
     };
     setShepherdStats(statsObj);
 
@@ -702,9 +738,12 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold">My Sheep Fold 🐑</h1>
           <p className="text-orange-100 mt-1">
             {shepherdStats.totalSheep > 0
-              ? `Shepherd ${profile.full_name?.split(' ')[0]}, you have ${shepherdStats.totalSheep} sheep under your care`
+              ? `Shepherd ${profile.full_name?.split(' ')[0]}, you have ${shepherdStats.totalSheep} member${shepherdStats.totalSheep === 1 ? '' : 's'} under your care`
               : `Welcome, Shepherd ${profile.full_name?.split(' ')[0]}! Your flock will appear here once members are assigned to you.`
             }
+            {shepherdStats.careExtras > 0
+              ? ` · Shepherd's Data also lists ${shepherdStats.careExtras} first timer${shepherdStats.careExtras === 1 ? '' : 's'} / new believer${shepherdStats.careExtras === 1 ? '' : 's'} in your bacentas.`
+              : ''}
           </p>
         </div>
 
