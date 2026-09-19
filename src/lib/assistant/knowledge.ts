@@ -17,10 +17,10 @@ export type KnowledgeArticle = {
 export const KNOWLEDGE: KnowledgeArticle[] = [
   {
     id: 'overview',
-    title: 'How The Fold works',
-    keywords: ['help', 'start', 'how', 'use', 'platform', 'what', 'fold', 'dashboard', 'guide'],
+    title: 'How Everything by Prayer works',
+    keywords: ['help', 'start', 'how', 'use', 'platform', 'what', 'fold', 'dashboard', 'guide', 'ebp', 'prayer'],
     roles: 'all',
-    body: `The Fold is EPC's church-growth workspace. Your job on most screens is one of four things: record a person, mark Sunday attendance, notice who is at risk, then follow up.
+    body: `Everything by Prayer is EPC's church-growth workspace. Your job on most screens is one of four things: record a person, mark Sunday attendance, notice who is at risk, then follow up.
 
 I can explain any page, look up live numbers for your branch, search people, and send you to the right screen. Ask in everyday language: "How do I mark attendance?" or "Who is flagged?"`,
     links: [{ href: '/dashboard', label: 'Open dashboard' }],

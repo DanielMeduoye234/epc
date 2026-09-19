@@ -73,7 +73,7 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || 'The Fold', options)
+    self.registration.showNotification(data.title || 'Everything by Prayer', options)
   );
 });
 

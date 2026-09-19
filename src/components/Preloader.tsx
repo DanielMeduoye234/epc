@@ -143,15 +143,15 @@ export default function Preloader({ onFinish }: { onFinish?: () => void }) {
 
         {/* App Name */}
         <div className="text-center title-entrance">
-          <h1 className="text-4xl sm:text-5xl font-black bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 bg-clip-text text-transparent drop-shadow-sm">
-            The Fold
+          <h1 className="text-3xl sm:text-4xl font-black bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 bg-clip-text text-transparent drop-shadow-sm">
+            Everything by Prayer
           </h1>
           <p
             className={`text-sm text-gray-500 mt-2 tracking-[0.2em] uppercase font-medium transition-all duration-1000 ${
               showTagline ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
             }`}
           >
-            Everything by Prayer Church
+            Church Growth Dashboard
           </p>
         </div>
 

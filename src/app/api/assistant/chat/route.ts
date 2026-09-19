@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: 'Sign in to use Fold Assistant.' }, { status: 401 });
+      return NextResponse.json({ error: 'Sign in to use the Everything by Prayer Assistant.' }, { status: 401 });
     }
 
     const { data: profile } = await supabase
@@ -67,6 +67,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('[assistant/chat]', error);
-    return NextResponse.json({ error: 'Fold Assistant could not answer just now.' }, { status: 500 });
+    return NextResponse.json({ error: 'The assistant could not answer just now.' }, { status: 500 });
   }
 }

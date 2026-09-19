@@ -58,7 +58,7 @@ export default function AssistantWidget() {
       {
         id: 'welcome',
         role: 'assistant',
-        content: `Hi ${profile.full_name.split(' ')[0] || 'there'}. I am Fold Assistant, here to make The Fold easier for a ${roleLabel}.\n\nAsk how to record someone, mark Sunday attendance, or look up who needs follow-up. I can also pull live numbers for ${profile.branch?.name || 'your branch'}.`,
+        content: `Hi ${profile.full_name.split(' ')[0] || 'there'}. I am the Everything by Prayer Assistant, here to make the dashboard easier for a ${roleLabel}.\n\nAsk how to record someone, mark Sunday attendance, or look up who needs follow-up. I can also pull live numbers for ${profile.branch?.name || 'your branch'}.`,
         links: [{ href: '/dashboard', label: 'Dashboard home' }],
       },
     ]);
@@ -98,7 +98,7 @@ export default function AssistantWidget() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Could not reach Fold Assistant.');
+        throw new Error(data.error || 'Could not reach the assistant.');
       }
       setMessages((prev) => [
         ...prev,
@@ -127,7 +127,7 @@ export default function AssistantWidget() {
         type="button"
         onClick={() => setOpen((value) => !value)}
         className="fixed bottom-5 right-5 z-[60] flex h-14 w-14 items-center justify-center rounded-full bg-orange-600 text-white transition hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-        aria-label={open ? 'Close Fold Assistant' : 'Open Fold Assistant'}
+        aria-label={open ? 'Close assistant' : 'Open Everything by Prayer Assistant'}
         aria-expanded={open}
       >
         {open ? <X size={22} /> : <MessageCircle size={22} />}
@@ -138,17 +138,17 @@ export default function AssistantWidget() {
           className="fixed bottom-24 right-5 z-[60] flex w-[min(100vw-2rem,380px)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white"
           role="dialog"
           aria-modal="false"
-          aria-labelledby="fold-assistant-title"
+          aria-labelledby="ebp-assistant-title"
         >
           <header className="flex items-start gap-3 border-b border-gray-100 bg-orange-50 px-4 py-3">
             <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-orange-600 text-white">
               <Sparkles size={16} />
             </span>
             <div className="min-w-0">
-              <h2 id="fold-assistant-title" className="text-sm font-semibold text-black">
-                Fold Assistant
+              <h2 id="ebp-assistant-title" className="text-sm font-semibold text-black">
+                Everything by Prayer Assistant
               </h2>
-              <p className="text-xs text-gray-600">Ask how to use The Fold, or look up live branch data.</p>
+              <p className="text-xs text-gray-600">Ask how to use the dashboard, or look up live branch data.</p>
             </div>
           </header>
 
@@ -210,11 +210,11 @@ export default function AssistantWidget() {
           </div>
 
           <form onSubmit={onSubmit} className="flex items-end gap-2 border-t border-gray-100 p-3">
-            <label htmlFor="fold-assistant-input" className="sr-only">
-              Ask Fold Assistant
+            <label htmlFor="ebp-assistant-input" className="sr-only">
+              Ask Everything by Prayer Assistant
             </label>
             <textarea
-              id="fold-assistant-input"
+              id="ebp-assistant-input"
               ref={inputRef}
               rows={1}
               value={input}

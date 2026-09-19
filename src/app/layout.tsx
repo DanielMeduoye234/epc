@@ -13,7 +13,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'The Fold - Everything by Prayer',
+  title: 'Everything by Prayer',
   description: 'Church Growth Dashboard for tracking New Believers, First Timers, and Members',
   icons: {
     icon: [
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'The Fold',
+    title: 'Everything by Prayer',
   },
 };
 

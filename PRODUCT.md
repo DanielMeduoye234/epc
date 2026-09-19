@@ -12,7 +12,7 @@ Primary jobs on a given screen: record a person, mark who was present, notice wh
 
 ## Product Purpose
 
-The Fold is EPC's church-growth workspace. It captures New Believers, First Timers, and Members, tracks Sunday attendance, and helps shepherds keep people from slipping away. Success is not a prettier admin panel. Success is every altar-call name stored the same day, weekly attendance logged, and flagged members contacted within 48 hours.
+The Everything by Prayer dashboard is EPC's church-growth workspace. It captures New Believers, First Timers, and Members, tracks Sunday attendance, and helps shepherds keep people from slipping away. Success is not a prettier admin panel. Success is every altar-call name stored the same day, weekly attendance logged, and flagged members contacted within 48 hours.
 
 ## Brand Personality
 

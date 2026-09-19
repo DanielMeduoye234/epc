@@ -1,7 +1,7 @@
 {
-  "name": "The Fold - Everything by Prayer",
-  "short_name": "The Fold",
-  "description": "EPC Guide for counselling access and church data retrieval",
+  "name": "Everything by Prayer",
+  "short_name": "EBP",
+  "description": "Church Growth Dashboard for tracking New Believers, First Timers, and Members",
   "start_url": "/guide",
   "display": "standalone",
   "background_color": "#ffffff",

@@ -15,7 +15,7 @@ export const TOOL_DEFINITIONS = [
     type: 'function' as const,
     function: {
       name: 'get_help',
-      description: 'Explain how to use a page or workflow on The Fold.',
+      description: 'Explain how to use a page or workflow on Everything by Prayer.',
       parameters: {
         type: 'object',
         properties: {

@@ -74,7 +74,7 @@ export async function localAssistant(
 
   const overview = articles.find((article) => article.id === 'overview') ?? articles[0];
   return {
-    reply: `${overview ? `**${overview.title}**\n\n${overview.body}` : 'Ask how to use any page on The Fold.'}\n\nYou can also ask for live numbers ("how many members?"), flagged people, birthdays, or "find Ama".`,
+    reply: `${overview ? `**${overview.title}**\n\n${overview.body}` : 'Ask how to use any page on Everything by Prayer.'}\n\nYou can also ask for live numbers ("how many members?"), flagged people, birthdays, or "find Ama".`,
     links: overview?.links ?? [],
     source: 'local',
   };
@@ -113,7 +113,7 @@ function systemPrompt(profile: Profile) {
     profile.role === 'recorder'
       ? 'New Believer Officer'
       : profile.role.replace('_', ' ');
-  return `You are Fold Assistant, the in-app guide for The Fold (Everything by Prayer church dashboard).
+  return `You are the Everything by Prayer Assistant, the in-app guide for the Everything by Prayer church dashboard.
 You help ${profile.full_name}, a ${roleLabel} at ${profile.branch?.name || 'their branch'}.
 
 Rules:
