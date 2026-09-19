@@ -14,100 +14,63 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({ profile: null, loading: true, isDemo: false });
 
-async function loadShepherdBacentas(
-  supabase: ReturnType<typeof createClient>,
-  profileRow: Profile
-): Promise<Profile> {
-  if (profileRow.role !== 'shepherd' || !profileRow.branch_id) {
-    return profileRow;
-  }
-
-  const { data: assignedBacentas, error: assignedBacentasError } = await supabase
-    .from('shepherd_bacentas')
-    .select('bacenta:bacentas(*)')
-    .eq('shepherd_id', profileRow.id)
-    .eq('branch_id', profileRow.branch_id);
-
-  const assigned = assignedBacentasError
-    ? []
-    : (assignedBacentas || [])
-        .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
-        .filter(Boolean);
-
-  return {
-    ...profileRow,
-    bacentas: assigned.length > 0
-      ? assigned
-      : profileRow.bacenta ? [profileRow.bacenta] : [],
-  };
-}
-
-async function fetchProfileForSession(
+async function resolveProfile(
   supabase: ReturnType<typeof createClient>,
   session: Session
 ): Promise<Profile | null> {
   const user = session.user;
-  const authHeaders: HeadersInit = {
-    Authorization: `Bearer ${session.access_token}`,
-  };
 
-  // Always try service-role path first — existing branch accounts must load.
-  try {
-    const meRes = await fetch('/api/auth/me', { headers: authHeaders, cache: 'no-store' });
-    if (meRes.ok) {
-      const meData = await meRes.json();
-      if (meData.profile) {
-        return await loadShepherdBacentas(supabase, meData.profile as Profile);
-      }
-    }
-  } catch {
-    // Fall through to client read.
-  }
-
-  const { data: clientProfile } = await supabase
+  // Same path that worked before the auth rewrites: direct profile read.
+  let { data: profileRow, error } = await supabase
     .from('profiles')
     .select('*, branch:branches(*), bacenta:bacentas(*)')
     .eq('id', user.id)
     .maybeSingle();
 
-  if (clientProfile) {
-    return await loadShepherdBacentas(supabase, clientProfile as Profile);
-  }
-
-  // Only create when the server confirms there is truly no profile.
-  const meta = user.user_metadata ?? {};
-  const createRes = await fetch('/api/auth/create-profile', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders,
-    },
-    body: JSON.stringify({
-      full_name: meta.full_name || '',
-      email: user.email || '',
-      role: meta.role || 'recorder',
-    }),
-  });
-
-  if (createRes.ok) {
-    const meRes = await fetch('/api/auth/me', { headers: authHeaders, cache: 'no-store' });
-    if (meRes.ok) {
-      const meData = await meRes.json();
-      if (meData.profile) {
-        return await loadShepherdBacentas(supabase, meData.profile as Profile);
+  // Fallback only if the row exists but client RLS hid it.
+  if (!profileRow) {
+    try {
+      const meRes = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: 'no-store',
+      });
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        profileRow = meData.profile ?? null;
       }
-    }
-    const { data: refetch } = await supabase
-      .from('profiles')
-      .select('*, branch:branches(*), bacenta:bacentas(*)')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (refetch) {
-      return await loadShepherdBacentas(supabase, refetch as Profile);
+    } catch {
+      // ignore
     }
   }
 
-  return null;
+  // Do NOT auto-create profiles on login. Creating during a race is what
+  // shoved existing users onto the setup screen. New users use signup/setup.
+  if (!profileRow && error) {
+    return null;
+  }
+
+  if (profileRow?.role === 'shepherd') {
+    const { data: assignedBacentas, error: assignedBacentasError } = await supabase
+      .from('shepherd_bacentas')
+      .select('bacenta:bacentas(*)')
+      .eq('shepherd_id', profileRow.id)
+      .eq('branch_id', profileRow.branch_id);
+
+    const assigned = assignedBacentasError
+      ? []
+      : (assignedBacentas || [])
+          .map((row: { bacenta: Profile['bacenta'] }) => row.bacenta)
+          .filter(Boolean);
+
+    profileRow = {
+      ...profileRow,
+      bacentas: assigned.length > 0
+        ? assigned
+        : profileRow.bacenta ? [profileRow.bacenta] : [],
+    };
+  }
+
+  return (profileRow as Profile | null) ?? null;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -135,22 +98,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setLoading(true);
       try {
-        const nextProfile = await fetchProfileForSession(supabase, session);
-        if (!cancelled) setProfile(nextProfile);
+        const next = await resolveProfile(supabase, session);
+        if (!cancelled) setProfile(next);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
-    // Initial session (may be empty briefly on first paint).
     supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
       void applySession(data.session);
     });
 
-    // Re-run whenever auth settles — this is what stops the false setup screen.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
-      void applySession(session);
-    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event: string, session: Session | null) => {
+        void applySession(session);
+      }
+    );
 
     return () => {
       cancelled = true;
