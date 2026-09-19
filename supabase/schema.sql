@@ -318,20 +318,31 @@ CREATE POLICY "Users can view their own branch"
 -- POLICIES: PROFILES
 -- ============================================================
 DROP POLICY IF EXISTS "Users can view profiles in their branch" ON profiles;
+DROP POLICY IF EXISTS "Users can view own profile or branch profiles" ON profiles;
 DROP POLICY IF EXISTS "Super admins and bishops can insert profiles" ON profiles;
 DROP POLICY IF EXISTS "Super admins can update profiles in their branch" ON profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
 
-CREATE POLICY "Users can view profiles in their branch"
+CREATE POLICY "Users can view own profile or branch profiles"
   ON profiles FOR SELECT
-  USING (branch_id = get_user_branch_id() OR get_user_role() = 'bishop');
+  USING (
+    id = auth.uid()
+    OR branch_id = get_user_branch_id()
+    OR get_user_role() = 'bishop'
+  );
 
 CREATE POLICY "Super admins and bishops can insert profiles"
   ON profiles FOR INSERT
-  WITH CHECK (get_user_role() IN ('super_admin', 'bishop'));
+  WITH CHECK (get_user_role() IN ('super_admin', 'bishop') OR id = auth.uid());
 
 CREATE POLICY "Super admins can update profiles in their branch"
   ON profiles FOR UPDATE
   USING (branch_id = get_user_branch_id() AND get_user_role() IN ('super_admin', 'bishop'));
+
+CREATE POLICY "Users can update their own profile"
+  ON profiles FOR UPDATE
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
 
 -- ============================================================
 -- POLICIES: BACENTAS

@@ -1603,6 +1603,7 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
   const [branchCode, setBranchCode] = useState('');
   const [branchLocation, setBranchLocation] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [adminMode, setAdminMode] = useState<'create' | 'join'>('join');
 
   const isAdminRole = role === 'super_admin' || role === 'bishop';
 
@@ -1624,16 +1625,19 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
     e.preventDefault();
     setSaving(true);
     setError('');
-    const body: Record<string, string> = {
+    const body: Record<string, string | boolean> = {
       userId: userId || existingProfile?.id || '',
       full_name: fullName || existingProfile?.full_name || '',
       email: email || existingProfile?.email || '',
       role: role || existingProfile?.role || 'super_admin',
     };
-    if (isAdminRole) {
+    if (isAdminRole && adminMode === 'create') {
       body.branchName = branchName;
       body.branchCode = branchCode;
       body.branchLocation = branchLocation;
+    } else if (isAdminRole && adminMode === 'join') {
+      body.branchCode = joinCode || branchCode;
+      body.joinExisting = true;
     } else {
       body.branchCode = joinCode;
     }
@@ -1666,10 +1670,12 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
               : <Users size={28} className="text-orange-500" />}
           </div>
           <h2 className="text-2xl font-bold text-gray-900">
-            {existingProfile ? 'Set Up Your Branch' : 'Finish Setting Up Your Account'}
+            {existingProfile ? 'Connect Your Branch' : 'Finish Setting Up Your Account'}
           </h2>
           <p className="text-gray-500 text-sm mt-1">
-            {existingProfile ? 'Create your branch to start using the dashboard' : 'A few details and you\'re ready to go'}
+            {existingProfile
+              ? 'Join your existing branch with its code, or create a new one'
+              : 'A few details and you\'re ready to go'}
           </p>
         </div>
 
@@ -1697,6 +1703,29 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
           )}
 
           {isAdminRole && (
+            <div className="flex rounded-lg border border-gray-200 p-1 bg-gray-50">
+              <button type="button" onClick={() => setAdminMode('join')}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition ${adminMode === 'join' ? 'bg-white text-black shadow-sm' : 'text-gray-500'}`}>
+                Join existing branch
+              </button>
+              <button type="button" onClick={() => setAdminMode('create')}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition ${adminMode === 'create' ? 'bg-white text-black shadow-sm' : 'text-gray-500'}`}>
+                Create new branch
+              </button>
+            </div>
+          )}
+
+          {isAdminRole && adminMode === 'join' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Branch Code *</label>
+              <input type="text" required value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="e.g. APARCH"
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-black" />
+              <p className="text-xs text-gray-400 mt-1">Use the code for the branch that already exists (do not create a duplicate)</p>
+            </div>
+          )}
+
+          {isAdminRole && adminMode === 'create' && (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Branch Name *</label>
@@ -1707,7 +1736,7 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Branch Code *</label>
                 <input type="text" required value={branchCode} onChange={e => setBranchCode(e.target.value.toUpperCase())}
-                  placeholder="e.g. IKJ" maxLength={6}
+                  placeholder="e.g. IKJ" maxLength={10}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-black" />
                 <p className="text-xs text-gray-400 mt-1">Share this code with your shepherds and recorders so they can join</p>
               </div>
@@ -1732,7 +1761,11 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
 
           <button type="submit" disabled={saving}
             className="w-full py-3 bg-linear-to-r from-orange-400 to-orange-600 text-white font-semibold rounded-lg hover:from-orange-500 hover:to-orange-700 transition disabled:opacity-50">
-            {saving ? 'Setting up...' : isAdminRole ? 'Create Branch & Open Dashboard' : 'Join Branch & Open Dashboard'}
+            {saving
+              ? 'Setting up...'
+              : isAdminRole && adminMode === 'create'
+                ? 'Create Branch & Open Dashboard'
+                : 'Join Branch & Open Dashboard'}
           </button>
         </form>
       </div>

@@ -9,16 +9,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Sign in before creating a profile.' }, { status: 401 });
     }
 
+    const admin = createAdminClient();
+
+    // Existing branch accounts must never be rewritten into "setup" state.
+    const { data: existing } = await admin
+      .from('profiles')
+      .select('id, full_name, email, role, branch_id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (existing?.branch_id) {
+      return NextResponse.json({ success: true, existing: true });
+    }
+
     const { full_name, email, role, branch_id, branchCode } = await request.json();
     const resolvedRole =
-      parseSignupRole(user.user_metadata?.role) || parseSignupRole(role) || 'recorder';
+      parseSignupRole(user.user_metadata?.role) ||
+      parseSignupRole(existing?.role) ||
+      parseSignupRole(role) ||
+      'recorder';
 
-    const name = (typeof full_name === 'string' && full_name.trim()) || user.user_metadata?.full_name || '';
+    const name =
+      (typeof full_name === 'string' && full_name.trim()) ||
+      existing?.full_name ||
+      user.user_metadata?.full_name ||
+      '';
     if (!name) {
       return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
     }
 
-    const admin = createAdminClient();
     let resolvedBranchId = typeof branch_id === 'string' ? branch_id : undefined;
 
     if (!resolvedBranchId && (resolvedRole === 'shepherd' || resolvedRole === 'recorder')) {
@@ -42,7 +61,7 @@ export async function POST(request: Request) {
     const profileData: Record<string, string> = {
       id: user.id,
       full_name: name,
-      email: (typeof email === 'string' && email) || user.email || '',
+      email: (typeof email === 'string' && email) || existing?.email || user.email || '',
       role: resolvedRole,
     };
     if (resolvedBranchId) profileData.branch_id = resolvedBranchId;
