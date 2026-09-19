@@ -1608,18 +1608,50 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
   const isAdminRole = role === 'super_admin' || role === 'bishop';
 
   useEffect(() => {
-    if (existingProfile) return; // already have profile data
-    supabase.auth.getUser().then(({ data: { user } }: { data: { user: import('@supabase/supabase-js').User | null } }) => {
-      if (user) {
-        setUserId(user.id);
-        setEmail(user.email || '');
-        const meta = user.user_metadata ?? {};
-        if (meta.full_name) setFullName(meta.full_name as string);
-        if (meta.role) setRole(meta.role as SetupRole);
+    if (existingProfile) return;
+
+    let cancelled = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        if (!cancelled) setLoading(false);
+        return;
       }
+
+      // If the account already has a branch, leave this setup screen immediately.
+      try {
+        const meRes = await fetch('/api/auth/me', {
+          headers: session.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+          cache: 'no-store',
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData.profile?.branch_id) {
+            window.location.reload();
+            return;
+          }
+          if (meData.profile) {
+            // Profile exists but no branch — parent should show BranchSetup; reload to refresh auth.
+            window.location.reload();
+            return;
+          }
+        }
+      } catch {
+        // Continue to manual setup form.
+      }
+
+      if (cancelled) return;
+      setUserId(user.id);
+      setEmail(user.email || '');
+      const meta = user.user_metadata ?? {};
+      if (meta.full_name) setFullName(meta.full_name as string);
+      if (meta.role) setRole(meta.role as SetupRole);
       setLoading(false);
-    });
-  }, []);
+    })();
+
+    return () => { cancelled = true; };
+  }, [existingProfile]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

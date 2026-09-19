@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { Profile } from '@/lib/types';
 import { isDemoMode, DEMO_PROFILE } from '@/lib/demo-data';
@@ -41,6 +42,74 @@ async function loadShepherdBacentas(
   };
 }
 
+async function fetchProfileForSession(
+  supabase: ReturnType<typeof createClient>,
+  session: Session
+): Promise<Profile | null> {
+  const user = session.user;
+  const authHeaders: HeadersInit = {
+    Authorization: `Bearer ${session.access_token}`,
+  };
+
+  // Always try service-role path first — existing branch accounts must load.
+  try {
+    const meRes = await fetch('/api/auth/me', { headers: authHeaders, cache: 'no-store' });
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      if (meData.profile) {
+        return await loadShepherdBacentas(supabase, meData.profile as Profile);
+      }
+    }
+  } catch {
+    // Fall through to client read.
+  }
+
+  const { data: clientProfile } = await supabase
+    .from('profiles')
+    .select('*, branch:branches(*), bacenta:bacentas(*)')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (clientProfile) {
+    return await loadShepherdBacentas(supabase, clientProfile as Profile);
+  }
+
+  // Only create when the server confirms there is truly no profile.
+  const meta = user.user_metadata ?? {};
+  const createRes = await fetch('/api/auth/create-profile', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      full_name: meta.full_name || '',
+      email: user.email || '',
+      role: meta.role || 'recorder',
+    }),
+  });
+
+  if (createRes.ok) {
+    const meRes = await fetch('/api/auth/me', { headers: authHeaders, cache: 'no-store' });
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      if (meData.profile) {
+        return await loadShepherdBacentas(supabase, meData.profile as Profile);
+      }
+    }
+    const { data: refetch } = await supabase
+      .from('profiles')
+      .select('*, branch:branches(*), bacenta:bacentas(*)')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (refetch) {
+      return await loadShepherdBacentas(supabase, refetch as Profile);
+    }
+  }
+
+  return null;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,83 +123,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const supabase = createClient();
-    async function getProfile() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) {
+    let cancelled = false;
+
+    async function applySession(session: Session | null) {
+      if (cancelled) return;
+      if (!session?.user) {
+        setProfile(null);
         setLoading(false);
         return;
       }
 
-      // 1) Prefer a direct client read (own-row RLS).
-      let { data: profileRow } = await supabase
-        .from('profiles')
-        .select('*, branch:branches(*), bacenta:bacentas(*)')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      // 2) If RLS/client miss, load via service-role API so existing branch
-      //    accounts still reach their dashboard.
-      if (!profileRow) {
-        const headers: HeadersInit = {};
-        if (session.access_token) {
-          headers.Authorization = `Bearer ${session.access_token}`;
-        }
-        const meRes = await fetch('/api/auth/me', { headers });
-        if (meRes.ok) {
-          const meData = await meRes.json();
-          profileRow = meData.profile ?? null;
-        }
+      setLoading(true);
+      try {
+        const nextProfile = await fetchProfileForSession(supabase, session);
+        if (!cancelled) setProfile(nextProfile);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      // 3) Only create a brand-new profile when none exists at all.
-      //    Never invent a second setup flow for accounts that already have a branch.
-      if (!profileRow) {
-        const meta = user.user_metadata ?? {};
-        const res = await fetch('/api/auth/create-profile', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(session.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-          },
-          body: JSON.stringify({
-            userId: user.id,
-            full_name: meta.full_name || '',
-            email: user.email || '',
-            role: meta.role || 'recorder',
-          }),
-        });
-        if (res.ok) {
-          const meRes = await fetch('/api/auth/me', {
-            headers: session.access_token
-              ? { Authorization: `Bearer ${session.access_token}` }
-              : {},
-          });
-          if (meRes.ok) {
-            const meData = await meRes.json();
-            profileRow = meData.profile ?? null;
-          }
-          if (!profileRow) {
-            const refetch = await supabase
-              .from('profiles')
-              .select('*, branch:branches(*), bacenta:bacentas(*)')
-              .eq('id', user.id)
-              .maybeSingle();
-            profileRow = refetch.data;
-          }
-        }
-      }
-
-      if (profileRow) {
-        profileRow = await loadShepherdBacentas(supabase, profileRow as Profile);
-      }
-
-      setProfile(profileRow as Profile | null);
-      setLoading(false);
     }
-    getProfile();
+
+    // Initial session (may be empty briefly on first paint).
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      void applySession(session);
+    });
+
+    // Re-run whenever auth settles — this is what stops the false setup screen.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      void applySession(session);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [demo]);
 
   return (

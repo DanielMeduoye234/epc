@@ -4,8 +4,8 @@ import { NextResponse } from 'next/server';
 
 /**
  * Returns the signed-in user's profile + branch using the service role.
- * Bypasses client RLS so existing branch accounts always reach their dashboard
- * even if a SELECT policy was too strict.
+ * Bypasses client RLS so existing branch accounts always reach their dashboard.
+ * If Auth was recreated for the same email, re-links the existing branch profile.
  */
 export async function GET(request: Request) {
   try {
@@ -15,7 +15,8 @@ export async function GET(request: Request) {
     }
 
     const admin = createAdminClient();
-    const { data: profile, error } = await admin
+
+    let { data: profile, error } = await admin
       .from('profiles')
       .select('*, branch:branches(*), bacenta:bacentas(*)')
       .eq('id', user.id)
@@ -23,6 +24,36 @@ export async function GET(request: Request) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Same email, different auth user id (e.g. account was recreated) — reclaim branch link.
+    if (!profile && user.email) {
+      const { data: byEmail } = await admin
+        .from('profiles')
+        .select('id, full_name, email, role, branch_id, bacenta_id')
+        .ilike('email', user.email)
+        .not('branch_id', 'is', null)
+        .maybeSingle();
+
+      if (byEmail?.branch_id && byEmail.id !== user.id) {
+        const { error: relinkError } = await admin.from('profiles').upsert({
+          id: user.id,
+          full_name: byEmail.full_name,
+          email: user.email,
+          role: byEmail.role,
+          branch_id: byEmail.branch_id,
+          bacenta_id: byEmail.bacenta_id,
+        });
+
+        if (!relinkError) {
+          const relinked = await admin
+            .from('profiles')
+            .select('*, branch:branches(*), bacenta:bacentas(*)')
+            .eq('id', user.id)
+            .maybeSingle();
+          profile = relinked.data;
+        }
+      }
     }
 
     if (!profile) {
