@@ -143,12 +143,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Initial session (may be empty briefly on first paint).
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      void applySession(session);
+    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
+      void applySession(data.session);
     });
 
     // Re-run whenever auth settles — this is what stops the false setup screen.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
       void applySession(session);
     });
 
