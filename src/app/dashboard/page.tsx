@@ -21,6 +21,8 @@ import {
   Bar,
   Legend,
   LabelList,
+  AreaChart,
+  Area,
 } from 'recharts';
 
 interface Stats {
@@ -59,6 +61,8 @@ interface AdminSnapshot {
   bacentaData: { name: string; value: number }[];
   recentNewBelievers: { id: string; full_name: string; date_saved: string; bacenta: string }[];
   thisMonthCount: number;
+  teamSyncShepherds?: { id: string; name: string; count: number }[];
+  teamSyncRecorders?: { id: string; name: string; count: number }[];
 }
 
 interface ShepherdSnapshot {
@@ -86,7 +90,10 @@ function toLocalDateKey(d: Date): string {
 
 // Parse a 'YYYY-MM-DD' (or ISO) string as a local date so buckets align to local days.
 function parseLocalDate(dateStr: string): Date {
-  return new Date(`${dateStr.slice(0, 10)}T00:00:00`);
+  if (!dateStr) return new Date();
+  const clean = dateStr.slice(0, 10);
+  const d = new Date(`${clean}T00:00:00`);
+  return isNaN(d.getTime()) ? new Date() : d;
 }
 
 function bucketKeyFor(date: Date, g: Granularity): string {
@@ -172,6 +179,8 @@ export default function DashboardPage() {
   const [rawAttendance, setRawAttendance] = useState<{ date: string; is_present: boolean }[]>([]);
   const [rawMemberJoinDates, setRawMemberJoinDates] = useState<string[]>([]);
   const [bacentaData, setBacentaData] = useState<{ name: string; value: number }[]>([]);
+  const [teamSyncShepherds, setTeamSyncShepherds] = useState<{ id: string; name: string; count: number }[]>([]);
+  const [teamSyncRecorders, setTeamSyncRecorders] = useState<{ id: string; name: string; count: number }[]>([]);
 
   // Shepherd state
   const [shepherdStats, setShepherdStats] = useState<ShepherdStats>({
@@ -241,6 +250,8 @@ export default function DashboardPage() {
           setBacentaData(cached.bacentaData);
           setRecentNewBelievers(cached.recentNewBelievers);
           setThisMonthCount(cached.thisMonthCount);
+          if (cached.teamSyncShepherds) setTeamSyncShepherds(cached.teamSyncShepherds);
+          if (cached.teamSyncRecorders) setTeamSyncRecorders(cached.teamSyncRecorders);
           setLoading(false);
         }
         fetchDashboardData();
@@ -296,19 +307,10 @@ export default function DashboardPage() {
   // ── Derived trend data, re-bucketed whenever the granularity changes ──
   const periodBuckets = useMemo(() => buildBuckets(granularity), [granularity]);
 
-  // Drop the empty periods from before the church started recording (keeping
-  // one lead-in period for context) so trends start at the first real data
-  // point instead of a long flat zero line ending in a fake "spike".
+  // Standard consistent time-series window (14 days, 8 weeks, or 6 months)
   const activeBuckets = useMemo(() => {
-    const keysWithData = new Set<string>();
-    rawAttendance.forEach((a) => keysWithData.add(bucketKeyFor(parseLocalDate(a.date), granularity)));
-    rawNewBelieverDates.forEach((d) => keysWithData.add(bucketKeyFor(parseLocalDate(d), granularity)));
-    rawFirstTimerDates.forEach((d) => keysWithData.add(bucketKeyFor(parseLocalDate(d), granularity)));
-    const firstIdx = periodBuckets.findIndex((b) => keysWithData.has(b.key));
-    if (firstIdx <= 0) return periodBuckets;
-    const start = Math.max(0, Math.min(firstIdx - 1, periodBuckets.length - 3));
-    return periodBuckets.slice(start);
-  }, [periodBuckets, granularity, rawAttendance, rawNewBelieverDates, rawFirstTimerDates]);
+    return periodBuckets;
+  }, [periodBuckets]);
 
   const attendanceGrowthData = useMemo(() => {
     const present: Record<string, number> = {};
@@ -633,6 +635,31 @@ export default function DashboardPage() {
       bacentaCounts[m.bacenta] = (bacentaCounts[m.bacenta] || 0) + 1;
     });
     setBacentaData(Object.entries(bacentaCounts).map(([name, value]) => ({ name, value })));
+
+    // Demo Team Sync
+    const demoShepherds: Record<string, { id: string; name: string; count: number }> = {};
+    DEMO_MEMBERS.forEach(m => {
+      if (m.assigned_shepherd) {
+        const u = DEMO_USERS[m.assigned_shepherd];
+        if (!demoShepherds[m.assigned_shepherd]) {
+          demoShepherds[m.assigned_shepherd] = { id: m.assigned_shepherd, name: u?.name || 'Shepherd', count: 0 };
+        }
+        demoShepherds[m.assigned_shepherd].count++;
+      }
+    });
+    const demoRecorders: Record<string, { id: string; name: string; count: number }> = {};
+    DEMO_NEW_BELIEVERS.forEach(b => {
+      if (b.recorded_by) {
+        const u = DEMO_USERS[b.recorded_by];
+        if (!demoRecorders[b.recorded_by]) {
+          demoRecorders[b.recorded_by] = { id: b.recorded_by, name: u?.name || 'Recorder', count: 0 };
+        }
+        demoRecorders[b.recorded_by].count++;
+      }
+    });
+    setTeamSyncShepherds(Object.values(demoShepherds));
+    setTeamSyncRecorders(Object.values(demoRecorders));
+
     setLoading(false);
   }
 
@@ -648,7 +675,20 @@ export default function DashboardPage() {
     const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
     // Everything in one parallel batch — a single network round trip.
-    const [nbRes, ftRes, mRes, fmRes, nbDatesRes, ftDatesRes, attendanceRes, membersRes, recentNBRes, thisMonthRes] = await Promise.all([
+    const [
+      nbRes,
+      ftRes,
+      mRes,
+      fmRes,
+      nbDatesRes,
+      ftDatesRes,
+      attendanceRes,
+      membersRes,
+      recentNBRes,
+      thisMonthRes,
+      nbRecordedByRes,
+      profilesRes,
+    ] = await Promise.all([
       supabase.from('new_believers').select('id', { count: 'exact', head: true }).eq('branch_id', branchId),
       supabase.from('first_timers').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('status', 'first_timer'),
       supabase.from('members').select('id', { count: 'exact', head: true }).eq('branch_id', branchId),
@@ -656,9 +696,11 @@ export default function DashboardPage() {
       supabase.from('new_believers').select('date_saved').eq('branch_id', branchId).gte('date_saved', startDate),
       supabase.from('first_timers').select('date_joined').eq('branch_id', branchId).gte('date_joined', startDate),
       supabase.from('attendance').select('date, is_present').eq('branch_id', branchId).gte('date', startDate),
-      supabase.from('members').select('bacenta, date_joined').eq('branch_id', branchId),
+      supabase.from('members').select('bacenta, date_joined, assigned_shepherd').eq('branch_id', branchId),
       supabase.from('new_believers').select('id, full_name, date_saved, bacenta').eq('branch_id', branchId).order('date_saved', { ascending: false }).limit(4),
       supabase.from('new_believers').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).gte('date_saved', firstOfMonth),
+      supabase.from('new_believers').select('recorded_by').eq('branch_id', branchId),
+      supabase.from('profiles').select('id, full_name, role').eq('branch_id', branchId).in('role', ['shepherd', 'recorder']),
     ]);
 
     const statsObj: Stats = {
@@ -681,6 +723,39 @@ export default function DashboardPage() {
       .map((m: { date_joined: string | null }) => m.date_joined)
       .filter(Boolean) as string[];
 
+    // Calculate real team sync statistics
+    const profileMap: Record<string, { name: string; role: string }> = {};
+    (profilesRes.data || []).forEach((p: { id: string; full_name: string; role: string }) => {
+      profileMap[p.id] = { name: p.full_name, role: p.role };
+    });
+
+    const shepherdCounts: Record<string, { id: string; name: string; count: number }> = {};
+    (membersRes.data || []).forEach((m: { assigned_shepherd?: string | null }) => {
+      if (m.assigned_shepherd) {
+        const sName = profileMap[m.assigned_shepherd]?.name || 'Shepherd';
+        if (!shepherdCounts[m.assigned_shepherd]) {
+          shepherdCounts[m.assigned_shepherd] = { id: m.assigned_shepherd, name: sName, count: 0 };
+        }
+        shepherdCounts[m.assigned_shepherd].count++;
+      }
+    });
+
+    const recorderCounts: Record<string, { id: string; name: string; count: number }> = {};
+    (nbRecordedByRes.data || []).forEach((b: { recorded_by?: string | null }) => {
+      if (b.recorded_by) {
+        const rName = profileMap[b.recorded_by]?.name || 'Recorder';
+        if (!recorderCounts[b.recorded_by]) {
+          recorderCounts[b.recorded_by] = { id: b.recorded_by, name: rName, count: 0 };
+        }
+        recorderCounts[b.recorded_by].count++;
+      }
+    });
+
+    const shList = Object.values(shepherdCounts);
+    const recList = Object.values(recorderCounts);
+    setTeamSyncShepherds(shList);
+    setTeamSyncRecorders(recList);
+
     setStats(statsObj);
     setRawNewBelieverDates(nbDates);
     setRawFirstTimerDates(ftDates);
@@ -699,6 +774,8 @@ export default function DashboardPage() {
       bacentaData: bacentaList,
       recentNewBelievers: recentNBRes.data || [],
       thisMonthCount: thisMonthRes.count || 0,
+      teamSyncShepherds: shList,
+      teamSyncRecorders: recList,
     } satisfies AdminSnapshot);
 
     setLoading(false);
@@ -1355,76 +1432,62 @@ export default function DashboardPage() {
       {/* Team Sync Overview */}
       {(profile?.role === 'super_admin' || profile?.role === 'bishop') && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black mb-1">🔄 Team Sync</h3>
-          <p className="text-sm text-gray-500 mb-4">Data flowing in from all shepherds and recorders</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Shepherd contributions */}
-            {(() => {
-              const shepherdCounts: Record<string, { name: string; count: number }> = {};
-              if (isDemo) {
-                DEMO_MEMBERS.forEach(m => {
-                  if (m.assigned_shepherd) {
-                    const user = DEMO_USERS[m.assigned_shepherd];
-                    if (!shepherdCounts[m.assigned_shepherd]) {
-                      shepherdCounts[m.assigned_shepherd] = { name: user?.name || 'Unknown', count: 0 };
-                    }
-                    shepherdCounts[m.assigned_shepherd].count++;
-                  }
-                });
-              }
-              return Object.entries(shepherdCounts).map(([id, { name, count }]) => (
-                <div key={id} className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-black flex items-center gap-2">
+                <span>🔄</span> Team Sync
+              </h3>
+              <p className="text-sm text-gray-500">Live contributions from shepherds and recorders</p>
+            </div>
+          </div>
+          {teamSyncShepherds.length > 0 || teamSyncRecorders.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {teamSyncShepherds.map(s => (
+                <div key={s.id} className="flex items-center gap-3 p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
                   <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-400 to-blue-600 flex items-center justify-center shrink-0">
                     <span className="text-white text-xs font-bold">🐑</span>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-black">{name}</p>
-                    <p className="text-xs text-gray-500">{count} members managed</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-black truncate">{s.name}</p>
+                    <p className="text-xs text-gray-500">{s.count} members managed</p>
                   </div>
                 </div>
-              ));
-            })()}
-            {/* Recorder contributions */}
-            {(() => {
-              const recorderCounts: Record<string, { name: string; count: number }> = {};
-              if (isDemo) {
-                DEMO_NEW_BELIEVERS.forEach(b => {
-                  const user = DEMO_USERS[b.recorded_by];
-                  if (!recorderCounts[b.recorded_by]) {
-                    recorderCounts[b.recorded_by] = { name: user?.name || 'Unknown', count: 0 };
-                  }
-                  recorderCounts[b.recorded_by].count++;
-                });
-              }
-              return Object.entries(recorderCounts).map(([id, { name, count }]) => (
-                <div key={id} className="flex items-center gap-3 p-3 bg-green-50 rounded-xl">
+              ))}
+              {teamSyncRecorders.map(r => (
+                <div key={r.id} className="flex items-center gap-3 p-3 bg-green-50/70 border border-green-100 rounded-xl">
                   <div className="w-10 h-10 rounded-full bg-linear-to-br from-green-400 to-green-600 flex items-center justify-center shrink-0">
                     <span className="text-white text-xs font-bold">📋</span>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-black">{name}</p>
-                    <p className="text-xs text-gray-500">{count} new believers recorded</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-black truncate">{r.name}</p>
+                    <p className="text-xs text-gray-500">{r.count} new believers recorded</p>
                   </div>
                 </div>
-              ));
-            })()}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 bg-gray-50/80 border border-dashed border-gray-200 rounded-xl text-center">
+              <p className="text-xs text-gray-500">
+                No shepherd assignments or recorder activity logged yet. As members are assigned to shepherds and records are added, team activity will display here.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Time-scale selector — controls the granularity of every trend chart below */}
+      {/* Time-scale selector — controls the granularity of trend charts */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-black">Trends</h2>
-          <p className="text-sm text-gray-500">View the charts by day, week, or month.</p>
+          <h2 className="text-lg font-semibold text-black">Church Growth & Trends</h2>
+          <p className="text-sm text-gray-500">Monitor attendance, soul winning, and membership trends</p>
         </div>
-        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 self-start">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 self-start shadow-2xs">
           {([['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']] as const).map(([value, label]) => (
             <button
               key={value}
               onClick={() => setGranularity(value)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-                granularity === value ? 'bg-orange-500 text-white' : 'text-gray-600 hover:text-black'
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition cursor-pointer ${
+                granularity === value ? 'bg-orange-500 text-white shadow-xs' : 'text-gray-600 hover:text-black hover:bg-gray-50'
               }`}
             >
               {label}
@@ -1433,154 +1496,174 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Charts Row */}
+      {/* Row 1: Attendance Growth & Soul Winning */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Attendance growth line chart */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">Church Growth in Attendance</h3>
-          <p className="text-sm text-gray-500 mb-4">Average people present per service, by {periodNoun}</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={attendanceGrowthData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'Avg present per service', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
-              <Tooltip
-                formatter={(value) => [`${value} people`, 'Avg per service']}
-                labelFormatter={(label, payload) => {
-                  const row = payload?.[0]?.payload as { services?: number } | undefined;
-                  return row?.services ? `${label} · ${row.services} service${row.services > 1 ? 's' : ''} recorded` : label;
-                }}
-              />
-              <Line type="monotone" dataKey="avgPresent" stroke={SERIES_1} strokeWidth={2} dot={{ r: 4 }} name="Avg per service" connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
+        {/* Attendance Turnout Chart */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-gray-900">Church Attendance</h3>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-orange-50 text-orange-700">Turnout</span>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Average attendance headcount per service ({periodWord.toLowerCase()})</p>
+          </div>
+          {attendanceGrowthData.some(d => d.avgPresent > 0 || d.avgAbsent > 0) ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={attendanceGrowthData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                <XAxis dataKey="period" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={45} />
+                <Tooltip
+                  formatter={(value, name) => [`${value} people`, name]}
+                  labelFormatter={(label, payload) => {
+                    const row = payload?.[0]?.payload as { services?: number; attendanceRate?: number } | undefined;
+                    return row?.services
+                      ? `${label} · ${row.services} service${row.services > 1 ? 's' : ''} (Avg Rate: ${row.attendanceRate}%)`
+                      : label;
+                  }}
+                  contentStyle={{ borderRadius: '0.75rem', borderColor: '#f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Bar dataKey="avgPresent" name="Present per service" fill={SERIES_1} radius={[4, 4, 0, 0]} maxBarSize={38} />
+                <Bar dataKey="avgAbsent" name="Absent" fill="#94a3b8" radius={[4, 4, 0, 0]} maxBarSize={38} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              <p className="text-sm font-medium text-gray-600">No attendance records yet</p>
+              <p className="text-xs text-gray-400 mt-1">Attendance marked by shepherds on Sundays will generate your attendance trends here.</p>
+            </div>
+          )}
         </div>
 
-        {/* Additions bar chart */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">{periodWord} Addition of First Timers and New Believers</h3>
-          <p className="text-sm text-gray-500 mb-4">New people added per {periodNoun} (number of people)</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={additionsData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'People added', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
-              <Tooltip formatter={(value, name) => [`${value} people`, name]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="newBelievers" fill={SERIES_1} name="New Believers" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="firstTimers" fill={SERIES_2} name="First Timers" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Additions: New Believers & First Timers */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-gray-900">Soul Winning & First Timers</h3>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{periodWord} Additions</span>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Number of souls added per {periodNoun}</p>
+          </div>
+          {additionsData.some(d => d.newBelievers > 0 || d.firstTimers > 0) ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={additionsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                <XAxis dataKey="period" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={45} />
+                <Tooltip
+                  formatter={(value, name) => [`${value} people`, name]}
+                  contentStyle={{ borderRadius: '0.75rem', borderColor: '#f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Bar dataKey="newBelievers" fill={SERIES_1} name="New Believers" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                <Bar dataKey="firstTimers" fill={SERIES_2} name="First Timers" radius={[4, 4, 0, 0]} maxBarSize={32} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              <p className="text-sm font-medium text-gray-600">No additions recorded yet</p>
+              <p className="text-xs text-gray-400 mt-1">Souls won and first-time guests logged in the system will appear here.</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Attendance composition + first timers trend */}
+      {/* Row 2: Total Membership Growth & Members by Bacenta */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">{periodWord} Attendance (Present vs Absent)</h3>
-          <p className="text-sm text-gray-500 mb-4">Average present and absent per service, by {periodNoun} — each person counted once per service</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={attendanceGrowthData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'People per service', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
-              <Tooltip
-                formatter={(value, name) => [`${value} people`, name]}
-                labelFormatter={(label, payload) => {
-                  const row = payload?.[0]?.payload as { services?: number } | undefined;
-                  return row?.services ? `${label} · avg of ${row.services} service${row.services > 1 ? 's' : ''}` : label;
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="avgPresent" stackId="a" fill={SERIES_1} name="Present" />
-              <Bar dataKey="avgAbsent" stackId="a" fill={SERIES_2} name="Absent" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Cumulative Membership Growth */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-gray-900">Total Membership Growth</h3>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Cumulative</span>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Total active & regular church members over time</p>
+          </div>
+          {membershipGrowthData.some(d => d.total > 0) ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart data={membershipGrowthData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="memberGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={SERIES_1} stopOpacity={0.25} />
+                    <stop offset="95%" stopColor={SERIES_1} stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                <XAxis dataKey="period" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={45} />
+                <Tooltip
+                  formatter={(value) => [`${value} members`, 'Total Church Members']}
+                  contentStyle={{ borderRadius: '0.75rem', borderColor: '#f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                />
+                <Area
+                  type="linear"
+                  dataKey="total"
+                  stroke={SERIES_1}
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#memberGrad)"
+                  dot={{ r: 3.5, fill: '#fff', stroke: SERIES_1, strokeWidth: 2 }}
+                  activeDot={{ r: 5 }}
+                  name="Total Members"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              <p className="text-sm font-medium text-gray-600">No member history available</p>
+              <p className="text-xs text-gray-400 mt-1">As members join, their cumulative growth will track here.</p>
+            </div>
+          )}
         </div>
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">{periodWord} First Timers</h3>
-          <p className="text-sm text-gray-500 mb-4">New first timers per {periodNoun} (number of people)</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={firstTimerTrendData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'First timers', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
-              <Tooltip formatter={(value) => [`${value} people`, 'First Timers']} />
-              <Line type="monotone" dataKey="count" stroke={SERIES_1} strokeWidth={2} dot={{ r: 4 }} name="First Timers" />
-            </LineChart>
-          </ResponsiveContainer>
+        {/* Members by Bacenta */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-gray-900">Members by Bacenta</h3>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">Distribution</span>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              Cell group distribution {bacentaData.length > 8 ? `(top 8 of ${bacentaData.length})` : ''}
+            </p>
+          </div>
+          {bacentaChartData.length > 0 && bacentaChartData.some(b => b.value > 0) ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart
+                data={bacentaChartData.slice(0, 8)}
+                layout="vertical"
+                margin={{ top: 5, right: 35, left: 10, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                <XAxis type="number" stroke="#9ca3af" fontSize={11} allowDecimals={false} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  stroke="#4b5563"
+                  fontSize={11}
+                  width={110}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(name: string) => name.length > 15 ? `${name.slice(0, 14)}…` : name}
+                />
+                <Tooltip
+                  formatter={(value) => [`${value} members`, 'Members']}
+                  contentStyle={{ borderRadius: '0.75rem', borderColor: '#f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                />
+                <Bar dataKey="value" name="Members" fill={SERIES_1} radius={[0, 4, 4, 0]} maxBarSize={20}>
+                  <LabelList dataKey="value" position="right" style={{ fontSize: 11, fill: '#4b5563', fontWeight: 600 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              <p className="text-sm font-medium text-gray-600">No bacenta distribution data</p>
+              <p className="text-xs text-gray-400 mt-1">Assign members to bacentas to see cell group strength here.</p>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Membership growth + attendance rate */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">Total Membership Growth</h3>
-          <p className="text-sm text-gray-500 mb-4">Total registered members over time — each person counted once, from their join date</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={membershipGrowthData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} allowDecimals={false} label={{ value: 'Total members', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
-              <Tooltip formatter={(value) => [`${value} members`, 'Total members']} />
-              <Line type="monotone" dataKey="total" stroke={SERIES_1} strokeWidth={2} dot={{ r: 4 }} name="Total members" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">Attendance Rate</h3>
-          <p className="text-sm text-gray-500 mb-4">Share of marked people who were present each {periodNoun} — spots engagement dips even when membership grows</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={attendanceGrowthData} margin={{ top: 5, right: 12, left: 8, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="period" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} label={{ value: 'Attendance rate', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6b7280' } }} />
-              <Tooltip
-                formatter={(value) => [`${value}%`, 'Attendance rate']}
-                labelFormatter={(label, payload) => {
-                  const row = payload?.[0]?.payload as { present?: number; absent?: number } | undefined;
-                  return row ? `${label} · ${row.present ?? 0} present / ${(row.present ?? 0) + (row.absent ?? 0)} marked` : label;
-                }}
-              />
-              <Line type="monotone" dataKey="attendanceRate" stroke={SERIES_2} strokeWidth={2} dot={{ r: 4 }} name="Attendance rate" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Members by Bacenta — sorted bars, largest first */}
-      {bacentaChartData.length > 0 && (
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-black">Members by Bacenta</h3>
-          <p className="text-sm text-gray-500 mb-4">
-            Largest bacentas first{bacentaData.length > 10 ? ` · top 10 of ${bacentaData.length} shown` : ''}
-          </p>
-          <ResponsiveContainer width="100%" height={Math.max(240, bacentaChartData.length * 38)}>
-            <BarChart
-              data={bacentaChartData}
-              layout="vertical"
-              margin={{ top: 5, right: 40, left: 8, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
-              <XAxis type="number" stroke="#6b7280" fontSize={12} allowDecimals={false} />
-              <YAxis
-                type="category"
-                dataKey="name"
-                stroke="#6b7280"
-                fontSize={12}
-                width={150}
-                tickFormatter={(name: string) => name.length > 20 ? `${name.slice(0, 19)}…` : name}
-              />
-              <Tooltip formatter={(value) => [`${value} members`, 'Members']} />
-              <Bar dataKey="value" name="Members" fill={SERIES_1} radius={[0, 4, 4, 0]} barSize={22}>
-                <LabelList dataKey="value" position="right" style={{ fontSize: 12, fill: '#374151' }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
     </div>
   );
 }

@@ -115,6 +115,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   first_timer_id UUID REFERENCES first_timers(id) ON DELETE SET NULL,
+  new_believer_id UUID REFERENCES new_believers(id) ON DELETE SET NULL,
   full_name TEXT NOT NULL,
   address TEXT NOT NULL,
   bacenta TEXT NOT NULL,

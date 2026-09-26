@@ -61,12 +61,13 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
   if (firstTimers.length === 0 && newBelievers.length === 0) return;
 
   // Get current members to avoid duplicates
-  const { data: currentMembers, error: membersError } = await supabase.from('members').select('id, full_name, phone_number, first_timer_id').eq('branch_id', branchId);
+  const { data: currentMembers, error: membersError } = await supabase.from('members').select('id, full_name, phone_number, first_timer_id, new_believer_id').eq('branch_id', branchId);
   if (ftRes.error || nbRes.error || membersError) {
     throw new Error(ftRes.error?.message || nbRes.error?.message || membersError?.message || 'Promotion data could not be loaded');
   }
-  const memberRows: { id: string; first_timer_id: string | null; full_name: string; phone_number: string }[] = currentMembers || [];
+  const memberRows: { id: string; first_timer_id: string | null; new_believer_id?: string | null; full_name: string; phone_number: string }[] = currentMembers || [];
   const existingFtIds = new Set(memberRows.map((m) => m.first_timer_id).filter(Boolean));
+  const existingNbIds = new Set(memberRows.map((m) => m.new_believer_id).filter(Boolean));
   const existingNames = new Set(memberRows.map((m) => m.full_name.toLowerCase().trim()));
   const existingPhones = new Set(memberRows.map((m) => m.phone_number.trim()).filter(Boolean));
 
@@ -153,15 +154,21 @@ async function checkAndPromoteIndividuals(supabase: SupabaseClient, branchId: st
     for (const nb of newBelievers) {
       const count = nbCounts[nb.id] || 0;
       const existingCandidates = memberRows.filter((member) =>
+        member.new_believer_id === nb.id ||
         isLikelySamePerson(member, nb) || phonesOverlap(member.phone_number, nb.phone_number)
       );
       const isAlreadyMember = existingCandidates.length > 0;
       if (count >= 2 && existingCandidates.length === 1) {
+        if (!existingCandidates[0].new_believer_id) {
+          await supabase.from('members').update({ new_believer_id: nb.id }).eq('id', existingCandidates[0].id);
+          existingCandidates[0].new_believer_id = nb.id;
+        }
         await migrateAttendanceHistory(supabase, nb.id, 'new_believer', existingCandidates[0].id, branchId);
         continue;
       }
-      if (count >= 2 && !isAlreadyMember) {
+      if (count >= 2 && !isAlreadyMember && !existingNbIds.has(nb.id)) {
         const { data: newMember, error: memberError } = await supabase.from('members').insert({
+          new_believer_id: nb.id,
           full_name: nb.full_name,
           address: nb.address,
           bacenta: nb.bacenta,

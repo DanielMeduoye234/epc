@@ -5,11 +5,14 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { NewBeliever, Bacenta } from '@/lib/types';
 import { DEMO_BACENTAS, DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
-import { Plus, Search, X, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Download, Upload } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
 import WhatsAppMessageModal, { WhatsAppRecipient } from '@/components/WhatsAppMessageModal';
+import CsvImportModal from '@/components/CsvImportModal';
+import { exportToCsv } from '@/lib/csv';
+import { syncSingleNewBelieverToMember } from '@/lib/sync-believers';
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -30,6 +33,8 @@ export default function NewBelieversPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [bacentas, setBacentas] = useState<Bacenta[]>([]);
   const [editRecord, setEditRecord] = useState<NewBelieverWithRecorder | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [whatsAppRecipient, setWhatsAppRecipient] = useState<WhatsAppRecipient | null>(null);
@@ -48,9 +53,16 @@ export default function NewBelieversPage() {
           recorder_name: DEMO_USERS[b.recorded_by]?.name || 'Unknown',
         }));
         setBelievers(withNames);
+        setBacentas(DEMO_BACENTAS);
         setLoading(false);
       } else {
         fetchBelievers();
+        supabase
+          .from('bacentas')
+          .select('*')
+          .eq('branch_id', profile.branch_id)
+          .order('name')
+          .then(({ data }: { data: Bacenta[] | null }) => setBacentas(data || []));
       }
     }
   }, [profile, isDemo]);
@@ -79,6 +91,35 @@ export default function NewBelieversPage() {
     setDeleteId(null);
   }
 
+  const handleExport = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const dataToExport = filtered.map(b => ({
+      full_name: b.full_name,
+      phone_number: b.phone_number,
+      address: b.address,
+      bacenta: b.bacenta,
+      who_brought: b.who_brought,
+      recorded_by: b.recorder_name || '',
+      date_saved: b.date_saved ? new Date(b.date_saved).toLocaleDateString() : '',
+      birthday: b.birthday || '',
+    }));
+
+    exportToCsv(
+      `epc-new-believers-${today}.csv`,
+      [
+        { label: 'Person', key: 'full_name' },
+        { label: 'Phone', key: 'phone_number' },
+        { label: 'Address', key: 'address' },
+        { label: 'Bacenta', key: 'bacenta' },
+        { label: 'Who Brought', key: 'who_brought' },
+        { label: 'Recorded By', key: 'recorded_by' },
+        { label: 'Date Saved', key: 'date_saved' },
+        { label: 'Birthday', key: 'birthday' },
+      ],
+      dataToExport
+    );
+  };
+
   const filtered = believers.filter(
     (b) =>
       b.full_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -100,13 +141,32 @@ export default function NewBelieversPage() {
           <h1 className="text-2xl font-bold text-black">New Believers</h1>
           <p className="text-gray-500 mt-1">People who gave their lives to Christ</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition"
-        >
-          <Plus size={20} />
-          Add New Believer
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition shadow-2xs text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            title="Export current table to CSV"
+          >
+            <Download size={17} className="text-gray-500" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-orange-50 border border-orange-200 text-orange-700 font-medium rounded-lg hover:bg-orange-100 transition shadow-2xs text-sm cursor-pointer"
+            title="Upload CSV to import records"
+          >
+            <Upload size={17} className="text-orange-600" />
+            Upload CSV
+          </button>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition shadow-2xs text-sm cursor-pointer"
+          >
+            <Plus size={18} />
+            Add New Believer
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -302,6 +362,21 @@ export default function NewBelieversPage() {
         isOpen={!!whatsAppRecipient}
         onClose={() => setWhatsAppRecipient(null)}
       />
+
+      {/* CSV Import Modal */}
+      <CsvImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSuccess={() => {
+          if (!isDemo) fetchBelievers();
+        }}
+        entityType="new_believers"
+        branchId={profile?.branch_id || ''}
+        userId={profile?.id || ''}
+        isDemo={isDemo}
+        availableBacentas={bacentas}
+        userRole={profile?.role}
+      />
     </div>
   );
 }
@@ -373,16 +448,55 @@ function NewBelieverForm({
       date_saved: form.date_saved,
     };
 
-    const { error } = isEditing
-      ? await supabase.from('new_believers').update(payload).eq('id', initialData!.id)
-      : await supabase.from('new_believers').insert({ ...payload, branch_id: branchId, recorded_by: recordedBy });
+    let savedId = initialData?.id;
 
-    if (error) {
-      setFormError(error.message || 'Failed to save. Please try again.');
-      setLoading(false);
+    if (isEditing) {
+      const { error } = await supabase.from('new_believers').update(payload).eq('id', initialData!.id);
+      if (error) {
+        setFormError(error.message || 'Failed to save. Please try again.');
+        setLoading(false);
+        return;
+      }
     } else {
-      onSaved();
+      const { data: inserted, error } = await supabase
+        .from('new_believers')
+        .insert({ ...payload, branch_id: branchId, recorded_by: recordedBy })
+        .select('id')
+        .single();
+
+      if (error) {
+        setFormError(error.message || 'Failed to save. Please try again.');
+        setLoading(false);
+        return;
+      }
+      if (inserted) {
+        savedId = inserted.id;
+      }
     }
+
+    // Automatically synchronize to members (zero duplication)
+    if (savedId) {
+      try {
+        await syncSingleNewBelieverToMember(supabase, {
+          id: savedId,
+          full_name,
+          first_name: payload.first_name,
+          last_name: payload.last_name,
+          nickname: payload.nickname,
+          phone_number: payload.phone_number,
+          address: payload.address,
+          bacenta: payload.bacenta,
+          who_brought: payload.who_brought,
+          birthday: payload.birthday,
+          date_saved: payload.date_saved,
+          branch_id: branchId,
+        });
+      } catch (syncErr) {
+        console.error('Failed to sync new believer to members:', syncErr);
+      }
+    }
+
+    onSaved();
   };
 
   return (

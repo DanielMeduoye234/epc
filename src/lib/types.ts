@@ -74,6 +74,7 @@ export interface FirstTimer {
 export interface Member {
   id: string;
   first_timer_id: string | null;
+  new_believer_id?: string | null;
   full_name: string;
   first_name: string | null;
   last_name: string | null;

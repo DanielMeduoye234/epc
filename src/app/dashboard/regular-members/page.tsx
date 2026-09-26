@@ -4,13 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { Member, MemberStatus, Bacenta } from '@/lib/types';
-import { DEMO_MEMBERS, DEMO_USERS } from '@/lib/demo-data';
+import { DEMO_MEMBERS, DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
 import { isInShepherdFlock, normalizeBacentaName, shepherdBacentaNames } from '@/lib/flock';
-import { Search, Users, Plus, X, Lock, Pencil, UserMinus, Trash2, AlertTriangle } from 'lucide-react';
+import { Search, Users, Plus, X, Lock, Pencil, UserMinus, Trash2, AlertTriangle, Download, Upload } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
 import WhatsAppMessageModal, { WhatsAppRecipient } from '@/components/WhatsAppMessageModal';
+import CsvImportModal from '@/components/CsvImportModal';
+import { exportToCsv } from '@/lib/csv';
+import { syncNewBelieversToMembers, mergeNewBelieversIntoDemoMembers } from '@/lib/sync-believers';
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -33,6 +36,7 @@ export default function RegularMembersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [bacentaFilter, setBacentaFilter] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editMember, setEditMember] = useState<MemberWithShepherd | null>(null);
   const [deactivateId, setDeactivateId] = useState<string | null>(null);
   const [deactivateError, setDeactivateError] = useState('');
@@ -52,7 +56,8 @@ export default function RegularMembersPage() {
   useEffect(() => {
     if (profile) {
       if (isDemo) {
-        const withNames: MemberWithShepherd[] = DEMO_MEMBERS.map(m => ({
+        const mergedDemo = mergeNewBelieversIntoDemoMembers(DEMO_MEMBERS, DEMO_NEW_BELIEVERS);
+        const withNames: MemberWithShepherd[] = mergedDemo.map(m => ({
           ...m,
           shepherd_name: m.assigned_shepherd ? DEMO_USERS[m.assigned_shepherd]?.name || 'Unknown' : undefined,
         }));
@@ -71,6 +76,13 @@ export default function RegularMembersPage() {
 
   async function fetchMembers() {
     if (profile!.role === 'super_admin' || profile!.role === 'bishop' || profile!.role === 'shepherd') {
+      try {
+        // Automatically sync any new believers in this branch into members with zero duplication
+        await syncNewBelieversToMembers(supabase, profile!.branch_id);
+      } catch (syncErr) {
+        console.error('Auto-sync new believers to members error:', syncErr);
+      }
+
       const [{ data }, shepherdBacentasRes, bacentasLeaderRes] = await Promise.all([
         supabase
           .from('members')
@@ -273,6 +285,39 @@ export default function RegularMembersPage() {
 
   const deactivatingMember = members.find(m => m.id === deactivateId);
 
+  const handleExport = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const dataToExport = filtered.map((m) => ({
+      full_name: m.full_name,
+      phone_number: m.phone_number,
+      address: m.address,
+      bacenta: m.bacenta,
+      shepherd: m.shepherd_name || '',
+      date_joined: m.date_joined ? new Date(m.date_joined).toLocaleDateString() : '',
+      membership_date: m.membership_date ? new Date(m.membership_date).toLocaleDateString() : '',
+      status: m.status,
+      category: m.new_believer_id ? 'New Believer' : m.first_timer_id ? 'First Timer' : 'Regular Member',
+      birthday: m.birthday || '',
+    }));
+
+    exportToCsv(
+      `epc-members-${today}.csv`,
+      [
+        { label: 'Member', key: 'full_name' },
+        { label: 'Category', key: 'category' },
+        { label: 'Phone', key: 'phone_number' },
+        { label: 'Address', key: 'address' },
+        { label: 'Bacenta', key: 'bacenta' },
+        { label: 'Shepherd', key: 'shepherd' },
+        { label: 'Date Joined', key: 'date_joined' },
+        { label: 'Membership Date', key: 'membership_date' },
+        { label: 'Status', key: 'status' },
+        { label: 'Birthday', key: 'birthday' },
+      ],
+      dataToExport
+    );
+  };
+
   const addMemberBacentas = useMemo(() => {
     if (profile?.role === 'shepherd') {
       return profile.bacentas && profile.bacentas.length > 0
@@ -320,16 +365,35 @@ export default function RegularMembersPage() {
             {profile?.role === 'shepherd' ? 'Manage and track your sheep fold' : 'All church members'}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Users size={20} className="text-gray-400" />
-            <span className="text-sm text-gray-500">{filtered.length} members</span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="hidden md:flex items-center gap-1.5 text-gray-500 text-sm mr-1">
+            <Users size={18} className="text-gray-400" />
+            <span>{filtered.length} {filtered.length === 1 ? 'member' : 'members'}</span>
           </div>
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition shadow-2xs text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            title="Export current table to CSV"
+          >
+            <Download size={17} className="text-gray-500" />
+            Export CSV
+          </button>
           {(profile?.role === 'shepherd' || profile?.role === 'super_admin' || profile?.role === 'bishop') && (
-            <button onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white text-sm font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition">
-              <Plus size={16} /> {profile?.role === 'shepherd' ? 'Add Sheep' : 'Add Member'}
-            </button>
+            <>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-orange-50 border border-orange-200 text-orange-700 font-medium rounded-lg hover:bg-orange-100 transition shadow-2xs text-sm cursor-pointer"
+                title="Upload CSV to import records"
+              >
+                <Upload size={17} className="text-orange-600" />
+                Upload CSV
+              </button>
+              <button onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-orange-400 to-orange-600 text-white text-sm font-medium rounded-lg hover:from-orange-500 hover:to-orange-700 transition shadow-2xs cursor-pointer">
+                <Plus size={16} /> {profile?.role === 'shepherd' ? 'Add Sheep' : 'Add Member'}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -390,7 +454,14 @@ export default function RegularMembersPage() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-black truncate">{member.full_name}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-medium text-black truncate">{member.full_name}</p>
+                        {member.new_believer_id && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                            New Believer
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500">
                         {member.bacenta} &middot; {new Date(member.membership_date).toLocaleDateString()}
                         {profile?.role === 'super_admin' && member.shepherd_name && (
@@ -476,7 +547,14 @@ export default function RegularMembersPage() {
                             )}
                           </div>
                           <div>
-                            <span className="font-medium text-black hover:text-orange-600 block">{member.full_name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-black hover:text-orange-600 block">{member.full_name}</span>
+                              {member.new_believer_id && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                  New Believer
+                                </span>
+                              )}
+                            </div>
                             {member.nickname && <span className="text-xs text-gray-400">Known as: {member.nickname}</span>}
                           </div>
                         </Link>
@@ -706,6 +784,21 @@ export default function RegularMembersPage() {
         recipient={whatsAppRecipient}
         isOpen={!!whatsAppRecipient}
         onClose={() => setWhatsAppRecipient(null)}
+      />
+
+      {/* CSV Import Modal */}
+      <CsvImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSuccess={() => {
+          if (!isDemo) fetchMembers();
+        }}
+        entityType="members"
+        branchId={profile?.branch_id || ''}
+        userId={profile?.id || ''}
+        isDemo={isDemo}
+        availableBacentas={bacentas}
+        userRole={profile?.role}
       />
     </div>
   );
