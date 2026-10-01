@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
-import { Heart, UserPlus, Users, AlertTriangle, CheckCircle, XCircle, TrendingUp, Building2, Bell, MapPin, Phone } from 'lucide-react';
+import { Heart, UserPlus, Users, AlertTriangle, CheckCircle, XCircle, TrendingUp, Building2, Bell, MapPin, Phone, ArrowRight, CalendarCheck } from 'lucide-react';
 import { isDemoMode, DEMO_NEW_BELIEVERS, DEMO_FIRST_TIMERS, DEMO_MEMBERS, DEMO_USERS, DEMO_BRANCHES, DEMO_BRANCH_STATS, DEMO_ALERTS } from '@/lib/demo-data';
 import { getCached, setCached } from '@/lib/query-cache';
 import { isInShepherdFlock, shepherdBacentaNames } from '@/lib/flock';
@@ -804,200 +804,183 @@ export default function DashboardPage() {
   // SHEPHERD DASHBOARD
   // ═══════════════════════════════════════════
   if (profile?.role === 'shepherd') {
-    const faithfulSheep = sheepList.filter(s => s.attendanceRate >= 70);
-    const atRiskSheep = sheepList.filter(s => s.attendanceRate >= 30 && s.attendanceRate < 70);
-    const lostSheep = sheepList.filter(s => s.attendanceRate < 30);
+    const total = shepherdStats.totalSheep;
+    const faithful = shepherdStats.activeSheep;
+    const atRisk = shepherdStats.flaggedSheep;
+    const lost = shepherdStats.inactiveSheep;
+    const needsAttention = atRisk + lost;
+    const faithfulPct = total > 0 ? Math.round((faithful / total) * 100) : 0;
+    const atRiskPct = total > 0 ? Math.round((atRisk / total) * 100) : 0;
+    const lostPct = total > 0 && (faithfulPct + atRiskPct <= 100) ? 100 - faithfulPct - atRiskPct : (total > 0 && lost > 0 ? Math.round((lost / total) * 100) : 0);
 
     return (
-      <div className="space-y-6">
-        {/* Shepherd Header */}
-        <div className="bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl p-6 text-white">
-          <h1 className="text-2xl font-bold">My Sheep Fold 🐑</h1>
-          <p className="text-orange-100 mt-1">
-            {shepherdStats.totalSheep > 0
-              ? `Shepherd ${profile.full_name?.split(' ')[0]}, you have ${shepherdStats.totalSheep} member${shepherdStats.totalSheep === 1 ? '' : 's'} under your care`
-              : `Welcome, Shepherd ${profile.full_name?.split(' ')[0]}! Your flock will appear here once members are assigned to you.`
-            }
-            {shepherdStats.careExtras > 0
-              ? ` · Shepherd's Data also lists ${shepherdStats.careExtras} first timer${shepherdStats.careExtras === 1 ? '' : 's'} / new believer${shepherdStats.careExtras === 1 ? '' : 's'} in your bacentas.`
-              : ''}
-          </p>
-        </div>
-
-        {/* Shepherd Stat Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs sm:text-sm text-gray-500 font-medium">Total Sheep</p>
-                <p className="text-2xl sm:text-3xl font-bold text-black mt-1">{shepherdStats.totalSheep}</p>
-              </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center">
-                <Users size={20} className="text-white" />
-              </div>
+      <div className="space-y-4 max-w-6xl">
+        {/* Single Compact Summary Section */}
+        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-gray-100 space-y-6">
+          {/* Header & Quick Action Buttons */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-gray-100">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-black flex items-center gap-2">
+                <span>Welcome, Shepherd {profile.full_name?.split(' ')[0]}</span>
+                <span role="img" aria-label="sheep">🐑</span>
+              </h1>
+              <p className="text-sm text-gray-500 mt-1">
+                {total > 0
+                  ? `Flock Summary · ${total} member${total === 1 ? '' : 's'} under your care`
+                  : 'Flock Summary · Your assigned members will appear here'}
+                {shepherdStats.careExtras > 0
+                  ? ` · ${shepherdStats.careExtras} new believer${shepherdStats.careExtras === 1 ? '' : 's'} / first timer${shepherdStats.careExtras === 1 ? '' : 's'} in your bacentas`
+                  : ''}
+              </p>
             </div>
-          </div>
-          <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs sm:text-sm text-gray-500 font-medium">Faithful</p>
-                <p className="text-2xl sm:text-3xl font-bold text-green-600 mt-1">{shepherdStats.activeSheep}</p>
-              </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-green-400 to-green-600 flex items-center justify-center">
-                <CheckCircle size={20} className="text-white" />
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs sm:text-sm text-gray-500 font-medium">At Risk</p>
-                <p className="text-2xl sm:text-3xl font-bold text-amber-600 mt-1">{shepherdStats.flaggedSheep}</p>
-              </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-amber-100 to-amber-200 flex items-center justify-center">
-                <span className="text-lg sm:text-xl" role="img" aria-label="wolf chasing sheep">🐺🐑</span>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs sm:text-sm text-gray-500 font-medium">Lost</p>
-                <p className="text-2xl sm:text-3xl font-bold text-red-600 mt-1">{shepherdStats.inactiveSheep}</p>
-              </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-linear-to-br from-red-100 to-red-200 flex items-center justify-center">
-                <span className="text-lg sm:text-xl" role="img" aria-label="wolf eating sheep">🐺🍖</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Eagle Eye Overview */}
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={20} className="text-orange-500" />
-            <h3 className="text-lg font-semibold text-black">Eagle Eye Overview</h3>
-          </div>
-          <p className="text-sm text-gray-500 mb-5">Attendance faithfulness at a glance — see who needs follow-up</p>
-
-          {/* Legend */}
-          <div className="flex flex-wrap gap-4 mb-5 text-xs">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="text-gray-600">Faithful (70%+)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-              <span className="text-gray-600">At Risk (30-69%)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <span className="text-gray-600">Lost (&lt;30%)</span>
+            <div className="flex items-center gap-2.5 shrink-0">
+              <Link
+                href="/dashboard/regular-members"
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200 transition"
+              >
+                <Users size={16} className="text-orange-500" />
+                My Sheep
+              </Link>
+              <Link
+                href="/dashboard/attendance"
+                className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-linear-to-r from-orange-400 to-orange-600 hover:from-orange-500 hover:to-orange-700 rounded-xl shadow-sm transition"
+              >
+                <CalendarCheck size={16} />
+                Shepherd&apos;s Data
+              </Link>
             </div>
           </div>
 
-          {/* Sheep Grid */}
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3">
-            {sheepList.map((sheep) => {
-              const color = sheep.attendanceRate >= 70 ? 'border-green-400 bg-green-50' :
-                            sheep.attendanceRate >= 30 ? 'border-amber-400 bg-amber-50' :
-                            'border-red-400 bg-red-50';
-              const ringColor = sheep.attendanceRate >= 70 ? 'ring-green-400' :
-                               sheep.attendanceRate >= 30 ? 'ring-amber-400' : 'ring-red-400';
-              return (
-                <Link
-                  key={sheep.id}
-                  href={`/dashboard/profile/member/${sheep.id}`}
-                  className={`flex flex-col items-center p-3 rounded-xl border-2 ${color} hover:shadow-md transition`}
-                >
-                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full ring-2 ${ringColor} flex items-center justify-center overflow-hidden bg-linear-to-br from-orange-400 to-orange-600`}>
-                    {sheep.photo_url ? (
-                      <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-white text-xs font-bold">
-                        {sheep.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] sm:text-xs font-medium text-gray-800 mt-1.5 text-center truncate w-full">
-                    {sheep.full_name.split(' ')[0]}
-                  </p>
-                  <p className={`text-[10px] font-bold mt-0.5 ${
-                    sheep.attendanceRate >= 70 ? 'text-green-600' :
-                    sheep.attendanceRate >= 30 ? 'text-amber-600' : 'text-red-600'
-                  }`}>
-                    {sheep.attendanceRate}%
-                  </p>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+          {/* Compact 4-Stat Row */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="p-4 rounded-xl bg-orange-50/60 border border-orange-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Sheep</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-black mt-1">{total}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0">
+                  <Users size={18} />
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2 font-medium">Assigned flock size</p>
+            </div>
 
-        {/* Sheep Needing Attention */}
-        {(atRiskSheep.length > 0 || lostSheep.length > 0) && (
-          <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-red-100">
-            <h3 className="text-lg font-semibold text-black mb-1">⚠️ Sheep Needing Attention</h3>
-            <p className="text-sm text-gray-500 mb-4">These members haven&apos;t been faithful in attendance</p>
-            <div className="space-y-3">
-              {[...lostSheep, ...atRiskSheep].map((sheep) => {
-                const daysSince = Math.floor((Date.now() - new Date(sheep.lastSeen).getTime()) / (1000 * 60 * 60 * 24));
-                return (
-                  <Link
-                    key={sheep.id}
-                    href={`/dashboard/profile/member/${sheep.id}`}
-                    className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-gray-50 hover:bg-orange-50 transition"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center overflow-hidden ring-2 ${
-                        sheep.attendanceRate < 30 ? 'ring-red-400' : 'ring-amber-400'
-                      } bg-linear-to-br from-orange-400 to-orange-600`}>
-                        {sheep.photo_url ? (
-                          <img src={sheep.photo_url} alt={sheep.full_name} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-white text-xs font-bold">
-                            {sheep.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-black text-sm">{sheep.full_name}</p>
-                        <p className="text-xs text-gray-500">
-                          Last seen {daysSince === 0 ? 'today' : daysSince === 1 ? 'yesterday' : `${daysSince} days ago`}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-sm font-bold ${
-                        sheep.attendanceRate < 30 ? 'text-red-600' : 'text-amber-600'
-                      }`}>
-                        {sheep.attendanceRate}%
-                      </p>
-                      <p className="text-[10px] text-gray-400 uppercase">attendance</p>
-                    </div>
-                  </Link>
-                );
-              })}
+            <div className="p-4 rounded-xl bg-green-50/60 border border-green-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Faithful</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-green-600 mt-1">{faithful}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center shrink-0">
+                  <CheckCircle size={18} />
+                </div>
+              </div>
+              <p className="text-[11px] text-green-700 mt-2 font-medium">
+                {faithfulPct}% of flock (70%+ attendance)
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">At Risk</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 mt-1">{atRisk}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+                  <AlertTriangle size={18} />
+                </div>
+              </div>
+              <p className="text-[11px] text-amber-700 mt-2 font-medium">
+                {atRiskPct}% of flock (30–69% attendance)
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-red-50/60 border border-red-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Lost</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-600 mt-1">{lost}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0">
+                  <XCircle size={18} />
+                </div>
+              </div>
+              <p className="text-[11px] text-red-700 mt-2 font-medium">
+                {lostPct}% of flock (&lt;30% attendance)
+              </p>
             </div>
           </div>
-        )}
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <Link
-            href="/dashboard/regular-members"
-            className="flex items-center justify-center gap-2 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-orange-200 transition text-sm font-medium text-gray-700"
-          >
-            <Users size={18} className="text-orange-500" />
-            View All Sheep
-          </Link>
-          <Link
-            href="/dashboard/attendance"
-            className="flex items-center justify-center gap-2 p-4 bg-linear-to-r from-orange-400 to-orange-600 rounded-2xl shadow-sm hover:shadow-md transition text-sm font-medium text-white"
-          >
-            <CheckCircle size={18} />
-            Mark Attendance
-          </Link>
+          {/* Proportional Attendance Health Bar */}
+          {total > 0 && (
+            <div className="pt-2">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-2 font-medium">
+                <span>Flock Faithfulness Breakdown</span>
+                <span className="font-semibold text-black">{faithfulPct}% Faithful</span>
+              </div>
+              <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden flex">
+                {faithfulPct > 0 && (
+                  <div
+                    style={{ width: `${faithfulPct}%` }}
+                    className="bg-green-500 h-full transition-all"
+                    title={`Faithful: ${faithful} (${faithfulPct}%)`}
+                  />
+                )}
+                {atRiskPct > 0 && (
+                  <div
+                    style={{ width: `${atRiskPct}%` }}
+                    className="bg-amber-400 h-full transition-all"
+                    title={`At Risk: ${atRisk} (${atRiskPct}%)`}
+                  />
+                )}
+                {lostPct > 0 && (
+                  <div
+                    style={{ width: `${lostPct}%` }}
+                    className="bg-red-500 h-full transition-all"
+                    title={`Lost: ${lost} (${lostPct}%)`}
+                  />
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-4 mt-2.5 text-[11px] text-gray-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+                  Faithful: {faithful} ({faithfulPct}%)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                  At Risk: {atRisk} ({atRiskPct}%)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+                  Lost: {lost} ({lostPct}%)
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Compact Needs-Attention Callout (No list of members) */}
+          {needsAttention > 0 ? (
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs sm:text-sm text-amber-900">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={18} className="text-amber-600 shrink-0" />
+                <span>
+                  <strong>{needsAttention} sheep need pastoral follow-up</strong> ({atRisk} at risk, {lost} lost).
+                </span>
+              </div>
+              <Link
+                href="/dashboard/regular-members"
+                className="font-semibold text-amber-800 hover:text-amber-950 inline-flex items-center gap-1 shrink-0"
+              >
+                View in My Sheep <ArrowRight size={14} />
+              </Link>
+            </div>
+          ) : total > 0 ? (
+            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl text-xs sm:text-sm text-green-800">
+              <CheckCircle size={18} className="text-green-600 shrink-0" />
+              <span>All members of your flock are currently in good attendance standing!</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -1696,16 +1679,21 @@ function AccountSetup({ existingProfile }: { existingProfile?: Profile }) {
       return;
     }
 
-    supabase.auth.getUser().then(({ data: { user } }: { data: { user: import('@supabase/supabase-js').User | null } }) => {
-      if (user) {
-        setUserId(user.id);
-        setEmail(user.email || '');
-        const meta = user.user_metadata ?? {};
-        if (meta.full_name) setFullName(meta.full_name as string);
-        if (meta.role) setRole(meta.role as SetupRole);
-      }
-      setLoading(false);
-    });
+    supabase.auth
+      .getUser()
+      .then(({ data: { user } }: { data: { user: import('@supabase/supabase-js').User | null } }) => {
+        if (user) {
+          setUserId(user.id);
+          setEmail(user.email || '');
+          const meta = user.user_metadata ?? {};
+          if (meta.full_name) setFullName(meta.full_name as string);
+          if (meta.role) setRole(meta.role as SetupRole);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        setLoading(false);
+      });
   }, [existingProfile]);
 
   const handleSubmit = async (e: React.FormEvent) => {

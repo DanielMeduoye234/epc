@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
+import type { Session, AuthError } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { Profile } from '@/lib/types';
 import { isDemoMode, DEMO_PROFILE } from '@/lib/demo-data';
@@ -108,6 +108,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const supabase = createClient();
     let cancelled = false;
 
+    async function handleAuthFailure() {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {}
+      if (typeof document !== 'undefined') {
+        const cookies = document.cookie.split(';');
+        for (const cookie of cookies) {
+          const [name] = cookie.trim().split('=');
+          if (name && (name.includes('-auth-token') || name.startsWith('sb-'))) {
+            document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+          }
+        }
+      }
+      if (!cancelled) {
+        setProfile(null);
+        setLoading(false);
+      }
+      if (typeof window !== 'undefined' && window.location.pathname.startsWith('/dashboard')) {
+        window.location.href = '/login';
+      }
+    }
+
     async function applySession(session: Session | null) {
       if (cancelled) return;
       if (!session?.user) {
@@ -120,23 +142,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const next = await resolveProfile(supabase, session);
         if (!cancelled) setProfile(next);
+      } catch (err) {
+        console.error('Error resolving profile:', err);
+        if (!cancelled) setProfile(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
-    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
-      void applySession(data.session);
-    });
+    // Intercept background unhandled rejections from supabase auto-refresh so Next.js doesn't show an error overlay
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const msg = (reason?.message || String(reason || '')).toLowerCase();
+      if (msg.includes('invalid refresh token') || (msg.includes('refresh token') && msg.includes('not found'))) {
+        event.preventDefault();
+        void handleAuthFailure();
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    }
+
+    supabase.auth
+      .getSession()
+      .then(async ({ data, error }: { data: { session: Session | null }; error: AuthError | null }) => {
+        if (cancelled) return;
+        if (error) {
+          const msg = error.message?.toLowerCase() || '';
+          if (msg.includes('refresh token') || msg.includes('not found') || error.status === 400) {
+            await handleAuthFailure();
+            return;
+          }
+        }
+        await applySession(data?.session ?? null);
+      })
+      .catch(async (err: unknown) => {
+        if (cancelled) return;
+        const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+        if (msg.includes('refresh token') || msg.includes('not found')) {
+          await handleAuthFailure();
+          return;
+        }
+        await applySession(null);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event: string, session: Session | null) => {
+      async (event: string, session: Session | null) => {
+        if (cancelled) return;
+        if (event === 'SIGNED_OUT') {
+          void applySession(null);
+          return;
+        }
+        if (event === 'TOKEN_REFRESHED' && !session) {
+          await handleAuthFailure();
+          return;
+        }
         void applySession(session);
       }
     );
 
     return () => {
       cancelled = true;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      }
       subscription.unsubscribe();
     };
   }, [demo]);
