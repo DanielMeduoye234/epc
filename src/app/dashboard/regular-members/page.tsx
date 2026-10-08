@@ -6,7 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { Member, MemberStatus, Bacenta } from '@/lib/types';
 import { DEMO_MEMBERS, DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
 import { isInShepherdFlock, normalizeBacentaName, shepherdBacentaNames } from '@/lib/flock';
-import { Search, Users, Plus, X, Lock, Pencil, UserMinus, Trash2, AlertTriangle, Download, Upload } from 'lucide-react';
+import { Search, Users, Plus, X, Lock, Pencil, UserMinus, Trash2, AlertTriangle, Download, Upload, Phone } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
@@ -398,37 +398,44 @@ export default function RegularMembersPage() {
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-4">
         <div className="relative flex-1">
-          <Search size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="Search by name or bacenta..." value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black text-sm" />
-        </div>
-        <div className="sm:w-56">
-          <BacentaSelect
-            value={bacentaFilter}
-            onChange={(val) => { setBacentaFilter(val); setCurrentPage(1); }}
-            options={[
-              { value: 'all', label: 'All Bacentas' },
-              ...bacentaFilterOptions.map((name) => ({ value: name, label: name })),
-            ]}
-            className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full text-sm"
-            placeholder="All Bacentas"
+          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by name or bacenta..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+            className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black text-sm"
           />
         </div>
-        <div className="sm:w-56">
-          <BacentaSelect
-            value={statusFilter}
-            onChange={(val) => { setStatusFilter(val); setCurrentPage(1); }}
-            options={[
-              { value: 'all', label: 'All Status' },
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
-              { value: 'flagged', label: 'Flagged' },
-            ]}
-            className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full text-sm"
-            placeholder="All Status"
-          />
+        <div className="grid grid-cols-2 sm:flex gap-2 sm:gap-4">
+          <div className="sm:w-52">
+            <BacentaSelect
+              value={bacentaFilter}
+              onChange={(val) => { setBacentaFilter(val); setCurrentPage(1); }}
+              options={[
+                { value: 'all', label: 'All Bacentas' },
+                ...bacentaFilterOptions.map((name) => ({ value: name, label: name })),
+              ]}
+              className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full text-xs sm:text-sm"
+              placeholder="All Bacentas"
+            />
+          </div>
+          <div className="sm:w-44">
+            <BacentaSelect
+              value={statusFilter}
+              onChange={(val) => { setStatusFilter(val); setCurrentPage(1); }}
+              options={[
+                { value: 'all', label: 'All Status' },
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+                { value: 'flagged', label: 'Flagged' },
+              ]}
+              className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-black w-full text-xs sm:text-sm"
+              placeholder="All Status"
+            />
+          </div>
         </div>
       </div>
 
@@ -441,74 +448,173 @@ export default function RegularMembersPage() {
           {/* Mobile Cards */}
           <div className="sm:hidden space-y-3">
             {paginatedData.map((member) => (
-              <div key={member.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                <div className="flex items-center gap-3">
-                  <Link href={`/dashboard/profile/member/${member.id}`} className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-11 h-11 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
+              <div
+                key={member.id}
+                className="bg-white rounded-2xl shadow-xs border border-gray-100 p-4 transition hover:border-orange-200"
+              >
+                {/* Header Row: Avatar, Identity & Status */}
+                <div className="flex items-start gap-3">
+                  <Link
+                    href={`/dashboard/profile/member/${member.id}`}
+                    className="shrink-0 active:scale-95 transition-transform"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-bold text-sm shadow-xs overflow-hidden ring-2 ring-orange-100">
                       {member.photo_url ? (
-                        <img src={member.photo_url} alt={member.full_name} className="w-full h-full object-cover" />
+                        <img
+                          src={member.photo_url}
+                          alt={member.full_name}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
-                        <span className="text-white text-xs font-bold">
-                          {member.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                        <span>
+                          {member.full_name
+                            .split(' ')
+                            .map((n) => n[0])
+                            .join('')
+                            .toUpperCase()
+                            .slice(0, 2)}
                         </span>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="font-medium text-black truncate">{member.full_name}</p>
+                  </Link>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <Link
+                        href={`/dashboard/profile/member/${member.id}`}
+                        className="min-w-0 flex-1 block group"
+                      >
+                        <h3 className="font-semibold text-gray-900 text-base leading-snug group-hover:text-orange-600 transition break-words">
+                          {member.full_name}
+                        </h3>
+                        {member.nickname && (
+                          <p className="text-xs text-gray-400 mt-0.5 truncate">
+                            Known as: <span className="text-gray-600 font-medium">{member.nickname}</span>
+                          </p>
+                        )}
+                      </Link>
+
+                      {/* Status badge */}
+                      <span
+                        className={`shrink-0 px-2.5 py-0.5 rounded-full text-[10px] font-semibold capitalize ${statusColors[member.status]}`}
+                      >
+                        {member.status}
+                      </span>
+                    </div>
+
+                    {/* Member category tags (New Believer / First Timer) */}
+                    {(member.new_believer_id || member.first_timer_id) && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {member.new_believer_id && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                             New Believer
                           </span>
                         )}
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        {member.bacenta} &middot; {new Date(member.membership_date).toLocaleDateString()}
-                        {profile?.role === 'super_admin' && member.shepherd_name && (
-                          <span className="text-blue-600"> &middot; 🐑 {member.shepherd_name}</span>
+                        {member.first_timer_id && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            First Timer
+                          </span>
                         )}
-                      </p>
-                    </div>
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold capitalize ${statusColors[member.status]}`}>
-                      {member.status}
-                    </span>
-                  </Link>
-                  <div className="flex items-center gap-1 shrink-0 ml-1">
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Metadata Details */}
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-gray-600">
+                  <span className="inline-flex items-center gap-1 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">
+                    <span className="text-gray-400 text-[11px] font-medium">Bacenta:</span>
+                    <span className="font-semibold text-gray-800">{member.bacenta || 'Unassigned'}</span>
+                  </span>
+
+                  <span className="text-gray-300 select-none">•</span>
+
+                  <span className="text-gray-500">
+                    Joined {new Date(member.membership_date).toLocaleDateString()}
+                  </span>
+
+                  {profile?.role === 'super_admin' && member.shepherd_name && (
+                    <>
+                      <span className="text-gray-300 select-none">•</span>
+                      <span className="inline-flex items-center gap-1 text-blue-600 font-medium">
+                        <span>🐑</span>
+                        <span>{member.shepherd_name}</span>
+                      </span>
+                    </>
+                  )}
+
+                  {member.phone_number && (
+                    <>
+                      <span className="text-gray-300 select-none">•</span>
+                      <a
+                        href={`tel:${member.phone_number}`}
+                        className="inline-flex items-center gap-1 font-mono text-[11px] text-gray-600 hover:text-orange-600 hover:underline"
+                        title="Call phone number"
+                      >
+                        <Phone size={12} className="text-gray-400" />
+                        <span>{member.phone_number}</span>
+                      </a>
+                    </>
+                  )}
+                </div>
+
+                {/* Bottom Action Bar */}
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setWhatsAppRecipient({
+                        name: member.full_name,
+                        phoneNumber: member.phone_number,
+                        nickname: member.nickname,
+                        category: 'member',
+                        bacenta: member.bacenta,
+                        photoUrl: member.photo_url,
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#128C7E] rounded-lg text-xs font-semibold transition active:scale-95 cursor-pointer"
+                  >
+                    <WhatsAppIcon className="w-3.5 h-3.5 text-[#25D366]" />
+                    <span>WhatsApp</span>
+                  </button>
+
+                  <div className="flex items-center gap-1">
                     <button
-                      type="button"
-                      title="Send WhatsApp message"
-                      onClick={() =>
-                        setWhatsAppRecipient({
-                          name: member.full_name,
-                          phoneNumber: member.phone_number,
-                          nickname: member.nickname,
-                          category: 'member',
-                          bacenta: member.bacenta,
-                          photoUrl: member.photo_url,
-                        })
-                      }
-                      className="p-1.5 hover:bg-green-50 text-[#25D366] rounded transition"
+                      onClick={() => setEditMember(member)}
+                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition active:scale-95 cursor-pointer"
+                      title="Edit"
+                      aria-label="Edit Member"
                     >
-                      <WhatsAppIcon className="w-4 h-4" />
+                      <Pencil size={15} />
                     </button>
-                    <button onClick={() => setEditMember(member)}
-                      className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition" title="Edit">
-                      <Pencil size={14} />
+                    <button
+                      onClick={() => {
+                        setDeactivateError('');
+                        setDeactivateId(member.id);
+                      }}
+                      className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition active:scale-95 cursor-pointer"
+                      title="Deactivate"
+                      aria-label="Deactivate Member"
+                    >
+                      <UserMinus size={15} />
                     </button>
-                    <button onClick={() => { setDeactivateError(''); setDeactivateId(member.id); }}
-                      className="p-1.5 hover:bg-amber-50 text-gray-400 hover:text-amber-600 rounded transition" title="Deactivate">
-                      <UserMinus size={14} />
-                    </button>
-                    <button onClick={() => { setDeleteError(''); setMemberToDelete(member); }}
-                      className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition" title="Delete completely">
-                      <Trash2 size={14} />
+                    <button
+                      onClick={() => {
+                        setDeleteError('');
+                        setMemberToDelete(member);
+                      }}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition active:scale-95 cursor-pointer"
+                      title="Delete completely"
+                      aria-label="Delete Member"
+                    >
+                      <Trash2 size={15} />
                     </button>
                   </div>
                 </div>
               </div>
             ))}
             {filtered.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
+              <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100">
                 {search ? 'No results found' : 'No members yet'}
               </div>
             )}
@@ -651,17 +757,27 @@ export default function RegularMembersPage() {
                 </tbody>
               </table>
             </div>
+            {/* Desktop Pagination Controls */}
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+              embedded
+            />
           </div>
 
-          {/* Pagination Controls */}
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filtered.length}
-            itemsPerPage={ITEMS_PER_PAGE}
-            onPageChange={setCurrentPage}
-            embedded
-          />
+          {/* Mobile Pagination Controls */}
+          <div className="sm:hidden mt-3">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+            />
+          </div>
         </>
       )}
 

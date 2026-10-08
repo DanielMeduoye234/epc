@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { NewBeliever, Bacenta } from '@/lib/types';
 import { DEMO_BACENTAS, DEMO_NEW_BELIEVERS, DEMO_USERS } from '@/lib/demo-data';
-import { Plus, Search, X, Pencil, Trash2, Download, Upload } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Download, Upload, Phone } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
@@ -190,120 +190,278 @@ export default function NewBelieversPage() {
           <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="table-shell">
-          <div className="overflow-x-auto">
-            <table className="table-compact">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Person</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Phone</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Address</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Bacenta</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Who Brought</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Recorded By</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Date Saved</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {paginatedData.map((believer) => (
-                  <tr key={believer.id} className="hover:bg-orange-50/50 transition">
-                    <td className="px-6 py-4">
-                      <Link href={`/dashboard/profile/new-believer/${believer.id}`} className="flex items-center gap-3">
-                        <div className="person-avatar rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
-                          {believer.photo_url ? (
-                            <img src={believer.photo_url} alt={believer.full_name} className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-white text-xs font-bold">
-                              {believer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                            </span>
-                          )}
-                        </div>
-                        <div>
-                          <span className="font-medium text-black hover:text-orange-600 block">{believer.full_name}</span>
-                          {believer.nickname && (
-                            <span className="text-xs text-gray-400">Known as: {believer.nickname}</span>
-                          )}
-                        </div>
+        <>
+          {/* Mobile Cards */}
+          <div className="sm:hidden space-y-3">
+            {paginatedData.map((believer) => (
+              <div
+                key={believer.id}
+                className="bg-white rounded-2xl shadow-xs border border-gray-100 p-4 transition hover:border-orange-200"
+              >
+                {/* Header: Avatar, Name, Recorder Pill */}
+                <div className="flex items-start gap-3">
+                  <Link
+                    href={`/dashboard/profile/new-believer/${believer.id}`}
+                    className="shrink-0 active:scale-95 transition-transform"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-bold text-sm shadow-xs overflow-hidden ring-2 ring-orange-100">
+                      {believer.photo_url ? (
+                        <img
+                          src={believer.photo_url}
+                          alt={believer.full_name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span>
+                          {believer.full_name
+                            .split(' ')
+                            .map((n) => n[0])
+                            .join('')
+                            .toUpperCase()
+                            .slice(0, 2)}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <Link
+                        href={`/dashboard/profile/new-believer/${believer.id}`}
+                        className="min-w-0 flex-1 block group"
+                      >
+                        <h3 className="font-semibold text-gray-900 text-base leading-snug group-hover:text-orange-600 transition break-words">
+                          {believer.full_name}
+                        </h3>
+                        {believer.nickname && (
+                          <p className="text-xs text-gray-400 mt-0.5 truncate">
+                            Known as: <span className="text-gray-600 font-medium">{believer.nickname}</span>
+                          </p>
+                        )}
                       </Link>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-600 text-sm">{believer.phone_number}</span>
-                        <button
-                          type="button"
-                          title="Send WhatsApp template / message"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setWhatsAppRecipient({
-                              name: believer.full_name,
-                              phoneNumber: believer.phone_number,
-                              nickname: believer.nickname,
-                              category: 'new_believer',
-                              bacenta: believer.bacenta,
-                              photoUrl: believer.photo_url,
-                            });
-                          }}
-                          className="p-1 hover:bg-green-50 rounded-full transition group"
-                        >
-                          <WhatsAppIcon className="w-5 h-5 text-[#25D366] group-hover:scale-110 transition-transform" />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={believer.address}>{believer.address}</td>
-                    <td className="px-6 py-4 text-gray-600">{believer.bacenta}</td>
-                    <td className="px-6 py-4 text-gray-600">{believer.who_brought}</td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
-                        {believer.recorder_name || 'Unknown'}
+
+                      {/* Recorded By Badge */}
+                      <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-50 text-green-700 border border-green-200/60">
+                        {believer.recorder_name || 'Recorded'}
                       </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {believer.date_saved
-                        ? new Date(believer.date_saved).toLocaleDateString()
-                        : '—'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setEditRecord(believer)}
-                          className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition"
-                          title="Edit"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteId(believer.id)}
-                          className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition"
-                          title="Delete"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="text-center py-12 text-gray-400">
-                      {search ? 'No results found' : 'No new believers recorded yet'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Details Section */}
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-gray-600">
+                  <span className="inline-flex items-center gap-1 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">
+                    <span className="text-gray-400 text-[11px] font-medium">Bacenta:</span>
+                    <span className="font-semibold text-gray-800">{believer.bacenta || 'Unassigned'}</span>
+                  </span>
+
+                  {believer.date_saved && (
+                    <>
+                      <span className="text-gray-300 select-none">•</span>
+                      <span className="text-gray-500">
+                        Saved: {new Date(believer.date_saved).toLocaleDateString()}
+                      </span>
+                    </>
+                  )}
+
+                  {believer.who_brought && (
+                    <>
+                      <span className="text-gray-300 select-none">•</span>
+                      <span className="text-gray-500">
+                        Brought by <strong className="text-gray-700 font-medium">{believer.who_brought}</strong>
+                      </span>
+                    </>
+                  )}
+
+                  {believer.phone_number && (
+                    <>
+                      <span className="text-gray-300 select-none">•</span>
+                      <a
+                        href={`tel:${believer.phone_number}`}
+                        className="inline-flex items-center gap-1 font-mono text-[11px] text-gray-600 hover:text-orange-600 hover:underline"
+                        title="Call phone number"
+                      >
+                        <Phone size={12} className="text-gray-400" />
+                        <span>{believer.phone_number}</span>
+                      </a>
+                    </>
+                  )}
+                </div>
+
+                {/* Bottom Action Bar */}
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setWhatsAppRecipient({
+                        name: believer.full_name,
+                        phoneNumber: believer.phone_number,
+                        nickname: believer.nickname,
+                        category: 'new_believer',
+                        bacenta: believer.bacenta,
+                        photoUrl: believer.photo_url,
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#128C7E] rounded-lg text-xs font-semibold transition active:scale-95 cursor-pointer"
+                  >
+                    <WhatsAppIcon className="w-3.5 h-3.5 text-[#25D366]" />
+                    <span>WhatsApp</span>
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setEditRecord(believer)}
+                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition active:scale-95 cursor-pointer"
+                      title="Edit"
+                      aria-label="Edit"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => setDeleteId(believer.id)}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition active:scale-95 cursor-pointer"
+                      title="Delete"
+                      aria-label="Delete"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100">
+                {search ? 'No results found' : 'No new believers recorded yet'}
+              </div>
+            )}
           </div>
 
-          {/* Pagination Controls */}
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filtered.length}
-            itemsPerPage={ITEMS_PER_PAGE}
-            onPageChange={setCurrentPage}
-            embedded
-          />
-        </div>
+          {/* Desktop Table */}
+          <div className="hidden sm:block table-shell">
+            <div className="overflow-x-auto">
+              <table className="table-compact">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Person</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Phone</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Address</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Bacenta</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Who Brought</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Recorded By</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Date Saved</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-gray-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {paginatedData.map((believer) => (
+                    <tr key={believer.id} className="hover:bg-orange-50/50 transition">
+                      <td className="px-6 py-4">
+                        <Link href={`/dashboard/profile/new-believer/${believer.id}`} className="flex items-center gap-3">
+                          <div className="person-avatar rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
+                            {believer.photo_url ? (
+                              <img src={believer.photo_url} alt={believer.full_name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-white text-xs font-bold">
+                                {believer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <span className="font-medium text-black hover:text-orange-600 block">{believer.full_name}</span>
+                            {believer.nickname && (
+                              <span className="text-xs text-gray-400">Known as: {believer.nickname}</span>
+                            )}
+                          </div>
+                        </Link>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-600 text-sm">{believer.phone_number}</span>
+                          <button
+                            type="button"
+                            title="Send WhatsApp template / message"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setWhatsAppRecipient({
+                                name: believer.full_name,
+                                phoneNumber: believer.phone_number,
+                                nickname: believer.nickname,
+                                category: 'new_believer',
+                                bacenta: believer.bacenta,
+                                photoUrl: believer.photo_url,
+                              });
+                            }}
+                            className="p-1 hover:bg-green-50 rounded-full transition group"
+                          >
+                            <WhatsAppIcon className="w-5 h-5 text-[#25D366] group-hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={believer.address}>{believer.address}</td>
+                      <td className="px-6 py-4 text-gray-600">{believer.bacenta}</td>
+                      <td className="px-6 py-4 text-gray-600">{believer.who_brought}</td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
+                          {believer.recorder_name || 'Unknown'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-gray-600">
+                        {believer.date_saved
+                          ? new Date(believer.date_saved).toLocaleDateString()
+                          : '—'}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setEditRecord(believer)}
+                            className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition"
+                            title="Edit"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(believer.id)}
+                            className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition"
+                            title="Delete"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="text-center py-12 text-gray-400">
+                        {search ? 'No results found' : 'No new believers recorded yet'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {/* Desktop Pagination Controls */}
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+              embedded
+            />
+          </div>
+
+          {/* Mobile Pagination Controls */}
+          <div className="sm:hidden mt-3">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        </>
       )}
 
       {/* Add Form Modal */}

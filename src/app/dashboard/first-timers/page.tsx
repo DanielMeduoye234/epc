@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/AuthProvider';
 import { FirstTimer, Bacenta } from '@/lib/types';
 import { DEMO_BACENTAS, DEMO_FIRST_TIMERS } from '@/lib/demo-data';
-import { Plus, Search, X, Pencil, Trash2, Download, Upload } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Download, Upload, Phone } from 'lucide-react';
 import Link from 'next/link';
 import BacentaSelect from '@/components/BacentaSelect';
 import Pagination from '@/components/Pagination';
@@ -203,116 +203,285 @@ export default function FirstTimersPage() {
           <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="table-shell">
-          <div className="overflow-x-auto">
-            <table className="table-compact">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Person</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Phone</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Address</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Bacenta</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Date Joined</th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">This Month</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {paginatedData.map((ft) => {
-                  const maxInMonth = ft._max_in_month ?? 0;
-                  const isReady = maxInMonth >= 2;
-                  return (
-                    <tr key={ft.id} className="hover:bg-orange-50/50 transition">
-                      <td className="px-6 py-4">
-                        <Link href={`/dashboard/profile/first-timer/${ft.id}`} className="flex items-center gap-3">
-                          <div className="person-avatar rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
-                            {ft.photo_url ? (
-                              <img src={ft.photo_url} alt={ft.full_name} className="w-full h-full object-cover" />
-                            ) : (
-                              <span className="text-white text-xs font-bold">
-                                {ft.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                              </span>
-                            )}
-                          </div>
-                          <div>
-                            <span className="font-medium text-black hover:text-orange-600 block">{ft.full_name}</span>
-                            {ft.nickname && <span className="text-xs text-gray-400">Known as: {ft.nickname}</span>}
-                          </div>
-                        </Link>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-600 text-sm">{ft.phone_number}</span>
-                          <button
-                            type="button"
-                            title="Send WhatsApp template / message"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setWhatsAppRecipient({
-                                name: ft.full_name,
-                                phoneNumber: ft.phone_number,
-                                nickname: ft.nickname,
-                                category: 'first_timer',
-                                bacenta: ft.bacenta,
-                                photoUrl: ft.photo_url,
-                              });
-                            }}
-                            className="p-1 hover:bg-green-50 rounded-full transition group"
-                          >
-                            <WhatsAppIcon className="w-5 h-5 text-[#25D366] group-hover:scale-110 transition-transform" />
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={ft.address}>{ft.address}</td>
-                      <td className="px-6 py-4 text-gray-600">{ft.bacenta}</td>
-                      <td className="px-6 py-4 text-gray-600">{new Date(ft.date_joined).toLocaleDateString()}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-linear-to-r from-orange-400 to-orange-600 rounded-full transition-all"
-                              style={{ width: `${Math.min(maxInMonth / 2 * 100, 100)}%` }} />
-                          </div>
-                          <span className={`text-xs font-medium ${isReady ? 'text-green-600' : 'text-gray-500'}`}>
-                            {maxInMonth}/2 {isReady ? '— Ready!' : ''}
+        <>
+          {/* Mobile Cards */}
+          <div className="sm:hidden space-y-3">
+            {paginatedData.map((ft) => {
+              const maxInMonth = ft._max_in_month ?? 0;
+              const isReady = maxInMonth >= 2;
+              return (
+                <div
+                  key={ft.id}
+                  className="bg-white rounded-2xl shadow-xs border border-gray-100 p-4 transition hover:border-orange-200"
+                >
+                  {/* Header: Avatar, Name, Ready Pill */}
+                  <div className="flex items-start gap-3">
+                    <Link
+                      href={`/dashboard/profile/first-timer/${ft.id}`}
+                      className="shrink-0 active:scale-95 transition-transform"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-bold text-sm shadow-xs overflow-hidden ring-2 ring-orange-100">
+                        {ft.photo_url ? (
+                          <img
+                            src={ft.photo_url}
+                            alt={ft.full_name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span>
+                            {ft.full_name
+                              .split(' ')
+                              .map((n) => n[0])
+                              .join('')
+                              .toUpperCase()
+                              .slice(0, 2)}
                           </span>
+                        )}
+                      </div>
+                    </Link>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <Link
+                          href={`/dashboard/profile/first-timer/${ft.id}`}
+                          className="min-w-0 flex-1 block group"
+                        >
+                          <h3 className="font-semibold text-gray-900 text-base leading-snug group-hover:text-orange-600 transition break-words">
+                            {ft.full_name}
+                          </h3>
+                          {ft.nickname && (
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">
+                              Known as: <span className="text-gray-600 font-medium">{ft.nickname}</span>
+                            </p>
+                          )}
+                        </Link>
+
+                        {/* Readiness badge */}
+                        <span
+                          className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            isReady
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-orange-50 text-orange-700 border border-orange-200/60'
+                          }`}
+                        >
+                          {maxInMonth}/2 {isReady ? 'Ready!' : 'Month'}
+                        </span>
+                      </div>
+
+                      {/* Attendance Progress Bar */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-linear-to-r from-orange-400 to-orange-600 rounded-full transition-all"
+                            style={{ width: `${Math.min((maxInMonth / 2) * 100, 100)}%` }}
+                          />
                         </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => setEditRecord(ft)}
-                            className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition" title="Edit">
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => setDeleteId(ft.id)}
-                            className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition" title="Delete">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-12 text-gray-400">
-                      {search ? 'No results found' : 'No first timers recorded yet'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                        <span className="text-[11px] text-gray-400 font-medium">
+                          {maxInMonth} of 2 attendances
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Details Section */}
+                  <div className="mt-3 pt-2.5 border-t border-gray-100 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-gray-600">
+                    <span className="inline-flex items-center gap-1 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">
+                      <span className="text-gray-400 text-[11px] font-medium">Bacenta:</span>
+                      <span className="font-semibold text-gray-800">{ft.bacenta || 'Unassigned'}</span>
+                    </span>
+
+                    <span className="text-gray-300 select-none">•</span>
+
+                    <span className="text-gray-500">
+                      Joined {new Date(ft.date_joined).toLocaleDateString()}
+                    </span>
+
+                    {ft.phone_number && (
+                      <>
+                        <span className="text-gray-300 select-none">•</span>
+                        <a
+                          href={`tel:${ft.phone_number}`}
+                          className="inline-flex items-center gap-1 font-mono text-[11px] text-gray-600 hover:text-orange-600 hover:underline"
+                          title="Call phone number"
+                        >
+                          <Phone size={12} className="text-gray-400" />
+                          <span>{ft.phone_number}</span>
+                        </a>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Bottom Action Bar */}
+                  <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setWhatsAppRecipient({
+                          name: ft.full_name,
+                          phoneNumber: ft.phone_number,
+                          nickname: ft.nickname,
+                          category: 'first_timer',
+                          bacenta: ft.bacenta,
+                          photoUrl: ft.photo_url,
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#128C7E] rounded-lg text-xs font-semibold transition active:scale-95 cursor-pointer"
+                    >
+                      <WhatsAppIcon className="w-3.5 h-3.5 text-[#25D366]" />
+                      <span>WhatsApp</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setEditRecord(ft)}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition active:scale-95 cursor-pointer"
+                        title="Edit"
+                        aria-label="Edit"
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      <button
+                        onClick={() => setDeleteId(ft.id)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition active:scale-95 cursor-pointer"
+                        title="Delete"
+                        aria-label="Delete"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100">
+                {search ? 'No results found' : 'No first timers recorded yet'}
+              </div>
+            )}
           </div>
 
-          {/* Pagination Controls */}
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filtered.length}
-            itemsPerPage={ITEMS_PER_PAGE}
-            onPageChange={setCurrentPage}
-            embedded
-          />
-        </div>
+          {/* Desktop Table */}
+          <div className="hidden sm:block table-shell">
+            <div className="overflow-x-auto">
+              <table className="table-compact">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Person</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Phone</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Address</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Bacenta</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">Date Joined</th>
+                    <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700">This Month</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-gray-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {paginatedData.map((ft) => {
+                    const maxInMonth = ft._max_in_month ?? 0;
+                    const isReady = maxInMonth >= 2;
+                    return (
+                      <tr key={ft.id} className="hover:bg-orange-50/50 transition">
+                        <td className="px-6 py-4">
+                          <Link href={`/dashboard/profile/first-timer/${ft.id}`} className="flex items-center gap-3">
+                            <div className="person-avatar rounded-full bg-linear-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 overflow-hidden">
+                              {ft.photo_url ? (
+                                <img src={ft.photo_url} alt={ft.full_name} className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-white text-xs font-bold">
+                                  {ft.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="font-medium text-black hover:text-orange-600 block">{ft.full_name}</span>
+                              {ft.nickname && <span className="text-xs text-gray-400">Known as: {ft.nickname}</span>}
+                            </div>
+                          </Link>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-600 text-sm">{ft.phone_number}</span>
+                            <button
+                              type="button"
+                              title="Send WhatsApp template / message"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setWhatsAppRecipient({
+                                  name: ft.full_name,
+                                  phoneNumber: ft.phone_number,
+                                  nickname: ft.nickname,
+                                  category: 'first_timer',
+                                  bacenta: ft.bacenta,
+                                  photoUrl: ft.photo_url,
+                                });
+                              }}
+                              className="p-1 hover:bg-green-50 rounded-full transition group"
+                            >
+                              <WhatsAppIcon className="w-5 h-5 text-[#25D366] group-hover:scale-110 transition-transform" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-gray-600 text-sm max-w-45 truncate" title={ft.address}>{ft.address}</td>
+                        <td className="px-6 py-4 text-gray-600">{ft.bacenta}</td>
+                        <td className="px-6 py-4 text-gray-600">{new Date(ft.date_joined).toLocaleDateString()}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div className="h-full bg-linear-to-r from-orange-400 to-orange-600 rounded-full transition-all"
+                                style={{ width: `${Math.min(maxInMonth / 2 * 100, 100)}%` }} />
+                            </div>
+                            <span className={`text-xs font-medium ${isReady ? 'text-green-600' : 'text-gray-500'}`}>
+                              {maxInMonth}/2 {isReady ? '— Ready!' : ''}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setEditRecord(ft)}
+                              className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition" title="Edit">
+                              <Pencil size={15} />
+                            </button>
+                            <button onClick={() => setDeleteId(ft.id)}
+                              className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition" title="Delete">
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-gray-400">
+                        {search ? 'No results found' : 'No first timers recorded yet'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {/* Desktop Pagination Controls */}
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+              embedded
+            />
+          </div>
+
+          {/* Mobile Pagination Controls */}
+          <div className="sm:hidden mt-3">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        </>
       )}
 
       {showForm && (

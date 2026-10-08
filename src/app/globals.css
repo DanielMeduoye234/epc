@@ -27,6 +27,15 @@ body {
     display: none;
   }
 
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .table-shell {
     background: #fff;
     border: 1px solid #e5e5e5;
@@ -67,5 +76,14 @@ body {
   .table-compact .person-avatar {
     width: 28px;
     height: 28px;
+  }
+}
+
+/* Prevent iOS Safari and mobile browser auto-zoom when focusing form inputs */
+@media screen and (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }

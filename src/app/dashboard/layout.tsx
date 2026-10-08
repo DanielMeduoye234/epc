@@ -12,7 +12,7 @@ export default function DashboardLayout({
       <div className="min-h-screen bg-gray-50">
         <Sidebar />
         <main className="lg:pl-[var(--sidebar-width,18rem)] transition-[padding] duration-200 ease-out motion-reduce:transition-none">
-          <div className="pt-16 px-4 pb-6 sm:px-6 sm:pt-6 lg:p-8">{children}</div>
+          <div className="pt-16 px-4 pb-24 sm:px-6 sm:pt-6 sm:pb-8 lg:p-8">{children}</div>
         </main>
         <AssistantWidget />
       </div>
